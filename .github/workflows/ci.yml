@@ -1,0 +1,27 @@
+---
+name: CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: CI Required
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+      - run: npm ci --no-audit --no-fund
+      # Offline: every reader and judge is scripted and fetch is disabled in
+      # the test suite. No provider key is available to this job.
+      - run: npm test
+      - name: Public-safe lint (org-agnostic leak shapes)
+        run: bash .github/public-safe-lint.sh .

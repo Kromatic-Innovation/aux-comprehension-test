@@ -1,0 +1,93 @@
+---
+name: Eval - Live panel
+
+# MANUAL ONLY. This workflow spends real tokens against real provider APIs.
+# It must NEVER run on push or pull_request, and it must NEVER be added as a
+# required check -- workflow_dispatch only. See eval/README.md.
+#
+# Credentials follow the same 1Password load-secrets pattern as the panelist
+# repository's manual evals: the only repository secret is
+# OP_SERVICE_ACCOUNT_TOKEN. A key that does not resolve leaves its provider
+# skipped and reported, not failed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      fixture:
+        description: "Fixture to read"
+        required: true
+        type: choice
+        options: [mini, neumann-before, neumann-after]
+      models:
+        description: "Comma-separated reader model ids (two providers for a possible pass)"
+        required: true
+        type: string
+      max_usd:
+        description: "Spend ceiling in USD (required, no default)"
+        required: true
+        type: string
+      judge:
+        description: "Judge model id (optional)"
+        required: false
+        type: string
+      prices:
+        description: "Price overrides as JSON (optional)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  live-panel:
+    name: Live panel (manual eval - spends tokens)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+      - run: npm ci --no-audit --no-fund
+
+      - name: Load provider API keys from 1Password
+        uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          ANTHROPIC_API_KEY: op://Infrastructure/anthropic-api-key/credential
+          OPENAI_API_KEY: op://Infrastructure/openai-api-key/credential
+
+      - name: Run the live panel
+        env:
+          FIXTURE: ${{ inputs.fixture }}
+          MODELS: ${{ inputs.models }}
+          MAX_USD: ${{ inputs.max_usd }}
+          JUDGE: ${{ inputs.judge }}
+          PRICES: ${{ inputs.prices }}
+        run: |
+          set -u
+          case "$FIXTURE" in
+            mini) dir=test/fixtures/mini; tools=tools.json; truth=truth.md; reqs=requests.json ;;
+            neumann-before) dir=test/fixtures/neumann; tools=tools-before.json; truth=truth-before.md; reqs=requests-before.json ;;
+            neumann-after) dir=test/fixtures/neumann; tools=tools-after.json; truth=truth-after.md; reqs=requests-after.json ;;
+            *) echo "unknown fixture: $FIXTURE" >&2; exit 64 ;;
+          esac
+          args=(run --tools "$dir/$tools" --truth "$dir/$truth" --requests "$dir/$reqs"
+                --models "$MODELS" --max-usd "$MAX_USD" --out eval-out)
+          if [ -n "$JUDGE" ]; then args+=(--judge "$JUDGE"); fi
+          if [ -n "$PRICES" ]; then printf '%s' "$PRICES" > "$RUNNER_TEMP/prices.json"; args+=(--prices "$RUNNER_TEMP/prices.json"); fi
+          set +e
+          node bin/aux-comprehension-test.mjs "${args[@]}"
+          code=$?
+          set -e
+          # 0 pass, 1 conditional, 2 fail are results; 3 refused and 64 usage are not.
+          if [ "$code" -ge 3 ]; then exit "$code"; fi
+
+      - name: Upload run directory
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: live-panel-${{ inputs.fixture }}
+          path: eval-out
+          if-no-files-found: ignore
