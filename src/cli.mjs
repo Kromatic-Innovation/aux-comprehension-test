@@ -135,6 +135,7 @@ export async function main(argv, { env = process.env, stdout = process.stdout, s
   stdout.write(
     `verdict: ${g.verdict} (crossModel: ${g.crossModel}; ${g.counts.mustFix} must-fix, ${g.counts.structural} structural, ` +
       `${g.counts.readerError} reader-error, ${g.counts.informational} informational)\n` +
+      (g.withheldPass.length ? `pass withheld: ${g.withheldPass.join("; ")}\n` : "") +
       `spend: $${result.cost.actual.usd.toFixed(4)} actual, $${result.cost.estimate.usd.toFixed(4)} estimated, ceiling $${maxUsd}\n` +
       `wrote ${opts.out}/verdict.md\n`,
   );

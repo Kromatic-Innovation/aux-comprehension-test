@@ -100,3 +100,12 @@ test("--help prints usage; an unknown flag is a usage error", async () => {
   assert.match(out.text, /--max-usd <N>/);
   assert.equal(await main(["run", "--bogus"], { stdout: sink(), stderr: sink() }), EXIT.usage);
 });
+
+test("without --judge the summary says pass is withheld and why", async () => {
+  const { base, out } = setup();
+  const stdout = sink();
+  const code = await main([...base, "--max-usd", "1", "--out", out], { env: {}, stdout, stderr: sink(), deps: deps() });
+  assert.equal(code, EXIT.conditional);
+  assert.match(stdout.text, /pass withheld: .*no --judge/);
+  assert.match(readFileSync(join(out, "verdict.md"), "utf8"), /## Why not pass[\s\S]*no --judge/);
+});

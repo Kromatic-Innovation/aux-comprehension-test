@@ -110,8 +110,12 @@ model, or no reader could run; nothing was called), `64` usage error.
 - **Confusion reports** are grouped by tool and the field they are about.
 - **Teach-back drift** is graded by an optional judge model (`--judge`), which
   compares each explanation with your intended meaning without knowing which
-  model wrote it. Without a judge, the readings are written side by side for
-  you to grade, and `pass` is withheld.
+  model wrote it. **Without `--judge`, `pass` is always withheld**: the
+  readings are written side by side for you to grade, and the best possible
+  verdict is `conditional`, with "no --judge" listed under "Why not pass" in
+  `verdict.md`, in `withheldPass` in `verdict.json` and on the CLI's
+  `pass withheld:` line. This is deliberate: an ungraded teach-back is not
+  evidence the copy was understood, so a judge-less run cannot certify it.
 - **Reader error vs. copy defect.** A defect tripped by exactly one reader,
   where the copy is unambiguous on re-read, is a reader error, not a must-fix.
   The judge does the re-read; without one the row is marked unverified. A defect
@@ -128,7 +132,8 @@ model, or no reader could run; nothing was called), `64` usage error.
 - **fail**: structural. A tool whose purpose no reader recovered.
 - **conditional**: must-fix rows exist, each a copy edit; or `pass` is withheld.
   `pass` is withheld when the panel spans only one provider, when fewer than
-  two readers answered, or when teach-back was not graded.
+  two readers answered, or when teach-back was not graded (no `--judge`, or
+  the judge failed).
 - **pass**: no must-fix rows, readers from at least two providers, and graded
   teach-back.
 
@@ -142,10 +147,14 @@ CLI estimates an upper bound on spend (the exact prompt each call will send, at
 chars / 4 tokens, plus each call's full output cap) and refuses to start if the
 estimate is over the ceiling. A model with no known price also refuses the run:
 it is never priced at zero. The bundled table in `data/prices.json` covers
-current Anthropic models; pass `--prices <file>` for others:
+current Anthropic models and OpenAI `gpt-5` (standard tier, verified against
+OpenAI's pricing page on the date recorded in the file's `sources` block).
+Prices match the exact id or a `-YYYYMMDD` / `@...` snapshot of it only, so
+`gpt-5-pro`, `gpt-5-mini` and dashed-date snapshots are unpriced until you add
+them. Pass `--prices <file>` for any other model:
 
 ```json
-{ "models": { "gpt-5": { "input": 1.25, "output": 10 } } }
+{ "models": { "gpt-5-mini": { "input": 0.25, "output": 2 } } }
 ```
 
 Prices are USD per million tokens. Check them against your provider before
