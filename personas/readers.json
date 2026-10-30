@@ -1,0 +1,45 @@
+{
+  "usage": "Synthetic reader personas are a cheap pre-filter for MCP tool copy, not validation: they are models reading a payload, not real MCP hosts running their own tool-selection harnesses.",
+  "personas": [
+    {
+      "id": "small-context-host",
+      "name": "Small-context host",
+      "role": "A small host model with limited context that has to pick tools quickly",
+      "caresAbout": ["choosing the right tool from its name and first sentence", "not wasting context on long or nested schemas"],
+      "rewards": ["tool names that say what the tool does", "a first sentence that settles when to use the tool"],
+      "punishes": ["brand verbs that hide the action", "meaning that only appears deep inside a schema"],
+      "quitsWhen": ["it has to read a nested schema to tell two tools apart", "two tool names could plausibly fit the same request"],
+      "lens": "Routes by tool name and the first sentence of the description; gives up on long or nested schemas."
+    },
+    {
+      "id": "cautious-agent",
+      "name": "Cautious agent",
+      "role": "An agent acting for a user who must not be charged or have data changed by surprise",
+      "caresAbout": ["what a call costs", "what a call changes or deletes", "exactly what each returned number means"],
+      "rewards": ["plain statements of cost, side effects and units", "annotations that match the description"],
+      "punishes": ["cost or side effects left implicit", "numbers whose meaning depends on an unstated convention"],
+      "quitsWhen": ["the copy does not say plainly whether an action is paid or irreversible", "a returned quantity could be read two ways"],
+      "lens": "Refuses any action that might be paid or irreversible unless the copy says plainly what it costs and what it changes."
+    },
+    {
+      "id": "technical-term-searcher",
+      "name": "Technical-term searcher",
+      "role": "An expert user's agent that looks for the domain's standard technical term",
+      "caresAbout": ["finding the tool by its standard technical name", "correct use of domain terms"],
+      "rewards": ["correct technical terms, explained once", "descriptions that name the method they implement"],
+      "punishes": ["technical terms replaced by vague marketing words", "a term used loosely or wrongly"],
+      "quitsWhen": ["the domain's standard term appears nowhere in the copy", "a term is used in a way an expert would call wrong"],
+      "lens": "Searches for the domain's technical term and fails when the copy hides it behind a brand verb."
+    },
+    {
+      "id": "literal-reader",
+      "name": "Literal reader",
+      "role": "A host model that takes every description exactly at its word",
+      "caresAbout": ["what the words literally say", "the boundary between similar tools"],
+      "rewards": ["descriptions that state when NOT to use the tool", "precise wording for counts, limits and units"],
+      "punishes": ["near-miss pairs with no stated boundary", "wording that is true only under an unstated reading"],
+      "quitsWhen": ["two descriptions both literally match a request", "a sentence is literally ambiguous"],
+      "lens": "Takes every description literally and trips on near-miss pairs and ambiguous wording."
+    }
+  ]
+}

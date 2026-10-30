@@ -1,0 +1,14 @@
+{
+  "_note": "USD per million tokens, list price. Provider prices change: verify before relying on an estimate, and pass --prices <file> to override or add models. A model with no entry here or in --prices makes the run refuse to start rather than be priced at zero. Matching is exact id first, then the longest prefix.",
+  "asOf": "2026-10",
+  "models": {
+    "claude-haiku-5-5": { "input": 0.1, "output": 0.5 },
+    "claude-haiku-4-5": { "input": 1, "output": 5 },
+    "claude-sonnet-5-5": { "input": 2, "output": 10 },
+    "claude-sonnet-5": { "input": 2, "output": 10 },
+    "claude-sonnet-4-6": { "input": 3, "output": 15 },
+    "claude-opus-5-5": { "input": 4, "output": 20 },
+    "claude-opus-5": { "input": 5, "output": 25 },
+    "claude-opus-4-8": { "input": 5, "output": 25 }
+  }
+}
