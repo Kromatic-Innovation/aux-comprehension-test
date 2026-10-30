@@ -5,6 +5,7 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { runMini } from "./_mini.mjs";
 import { resetRegistry, TEST_PRICES } from "./_mock.mjs";
+import { readFileSync } from "node:fs";
 import { estimate, priceFor, loadPrices } from "../src/cost.mjs";
 
 beforeEach(resetRegistry);
@@ -77,4 +78,31 @@ test("the bundled price table loads and has no zero prices", () => {
   const prices = loadPrices();
   assert.ok(Object.keys(prices).length > 0);
   for (const [id, p] of Object.entries(prices)) assert.ok(p.input > 0 && p.output > 0, id);
+});
+
+// The workspace skill's default panel (its "Default model matrix"): current
+// Haiku, current Sonnet (also the default judge) and one OpenAI GPT reader.
+// The skill names the GPT reader only as "one OpenAI GPT model"; gpt-5 is the
+// id this package documents and tests with. The README usage example's
+// Anthropic ids are included so the documented command runs unmodified.
+// Checked against the bundled table only, never TEST_PRICES.
+const SKILL_DEFAULT_PANEL = ["claude-haiku-5-5", "claude-sonnet-5-5", "gpt-5", "claude-haiku-4-5", "claude-sonnet-4-6"];
+
+test("every model in the skill's default panel is priced by the bundled table", () => {
+  const prices = loadPrices();
+  for (const id of SKILL_DEFAULT_PANEL) assert.ok(priceFor(id, prices), `${id} has no bundled price`);
+});
+
+test("bundled OpenAI prices record their source and retrieval date", () => {
+  const raw = JSON.parse(readFileSync(new URL("../data/prices.json", import.meta.url), "utf8"));
+  const src = raw.sources?.openai;
+  assert.match(src?.url ?? "", /^https:\/\/developers\.openai\.com\//);
+  assert.match(src?.retrieved ?? "", /^\d{4}-\d{2}-\d{2}$/);
+  assert.deepEqual(raw.models["gpt-5"], { input: 1.25, output: 10 });
+});
+
+test("an OpenAI variant or dashed-date snapshot of a bundled id stays unpriced", () => {
+  const prices = loadPrices();
+  assert.equal(priceFor("gpt-5-pro", prices), null);
+  assert.equal(priceFor("gpt-5-2025-08-07", prices), null);
 });

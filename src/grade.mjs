@@ -169,7 +169,7 @@ export function decide({ clusters, readers, rereads, teachBackGraded, tokenWeigh
   const withheld = [];
   if (nReaders < 2) withheld.push("fewer than two readers answered; one reader is never a run");
   if (!crossModel) withheld.push(`single-provider panel (${providers.join(", ") || "none"}); crossModel is required for pass`);
-  if (!teachBackGraded) withheld.push("teach-back drift not graded (no --judge); grade readers/ side by side");
+  if (!teachBackGraded) withheld.push("teach-back drift not graded (no --judge); pass requires a judge, so grade readers/ side by side");
 
   let verdict;
   if (count("structural") > 0) verdict = "fail";

@@ -1,6 +1,14 @@
 {
-  "_note": "USD per million tokens, list price. Provider prices change: verify before relying on an estimate, and pass --prices <file> to override or add models. A model with no entry here or in --prices makes the run refuse to start rather than be priced at zero. Matching is the exact id, or a dated snapshot of it (<id>-YYYYMMDD or <id>@...); any other variant is unpriced. OpenAI and other providers are deliberately not bundled: supply them with --prices.",
+  "_note": "USD per million tokens, list price (standard tier). Provider prices change: verify before relying on an estimate, and pass --prices <file> to override or add models. A model with no entry here or in --prices makes the run refuse to start rather than be priced at zero. Matching is the exact id, or a dated snapshot of it (<id>-YYYYMMDD or <id>@...); any other variant is unpriced, including OpenAI's dashed-date snapshots (<id>-YYYY-MM-DD) and -pro/-mini variants. Only the OpenAI ids listed under sources.openai are bundled; supply other providers with --prices.",
   "asOf": "2026-10",
+  "sources": {
+    "openai": {
+      "url": "https://developers.openai.com/api/docs/pricing",
+      "retrieved": "2026-10-30",
+      "tier": "Standard, text tokens, USD per 1M tokens",
+      "models": ["gpt-5"]
+    }
+  },
   "models": {
     "claude-haiku-5-5": { "input": 0.1, "output": 0.5 },
     "claude-haiku-4-5": { "input": 1, "output": 5 },
@@ -9,6 +17,7 @@
     "claude-sonnet-4-6": { "input": 3, "output": 15 },
     "claude-opus-5-5": { "input": 4, "output": 20 },
     "claude-opus-5": { "input": 5, "output": 25 },
-    "claude-opus-4-8": { "input": 5, "output": 25 }
+    "claude-opus-4-8": { "input": 5, "output": 25 },
+    "gpt-5": { "input": 1.25, "output": 10 }
   }
 }
