@@ -1,5 +1,5 @@
 {
-  "_note": "USD per million tokens, list price. Provider prices change: verify before relying on an estimate, and pass --prices <file> to override or add models. A model with no entry here or in --prices makes the run refuse to start rather than be priced at zero. Matching is exact id first, then the longest prefix.",
+  "_note": "USD per million tokens, list price. Provider prices change: verify before relying on an estimate, and pass --prices <file> to override or add models. A model with no entry here or in --prices makes the run refuse to start rather than be priced at zero. Matching is the exact id, or a dated snapshot of it (<id>-YYYYMMDD or <id>@...); any other variant is unpriced. OpenAI and other providers are deliberately not bundled: supply them with --prices.",
   "asOf": "2026-10",
   "models": {
     "claude-haiku-5-5": { "input": 0.1, "output": 0.5 },

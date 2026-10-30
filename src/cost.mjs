@@ -20,12 +20,16 @@ export function loadPrices(overridePath) {
   return models;
 }
 
+/**
+ * Exact id, or a dated snapshot of a listed id (`<id>-YYYYMMDD` or `<id>@...`).
+ * Any other variant is unpriced: matching on a bare prefix would let a more
+ * expensive variant (say `<id>-pro`) inherit a cheaper base price and slip
+ * under --max-usd.
+ */
 export function priceFor(model, prices) {
   if (prices[model]) return prices[model];
-  const prefix = Object.keys(prices)
-    .filter((k) => model.startsWith(k))
-    .sort((a, b) => b.length - a.length)[0];
-  return prefix ? prices[prefix] : null;
+  const m = model.match(/^(.+?)(-\d{8}|@.+)$/);
+  return m && prices[m[1]] ? prices[m[1]] : null;
 }
 
 export const approxTokens = (text) => Math.ceil(String(text).length / 4);

@@ -48,12 +48,22 @@ test("the estimate is an upper bound on the scripted run's actual spend", async 
   assert.equal(res.cost.maxUsd, 1);
 });
 
-test("priceFor matches exact ids first, then the longest prefix", () => {
-  const p = { "claude-sonnet-5": { input: 1, output: 1 }, "claude-sonnet-5-5": { input: 2, output: 2 } };
+test("priceFor matches exact ids and dated snapshots only", () => {
+  const p = { "claude-sonnet-5": { input: 1, output: 1 }, "claude-sonnet-5-5": { input: 2, output: 2 }, "gpt-5": { input: 1, output: 1 } };
   assert.equal(priceFor("claude-sonnet-5-5", p).input, 2);
-  assert.equal(priceFor("claude-sonnet-5-5-preview", p).input, 2);
   assert.equal(priceFor("claude-sonnet-5", p).input, 1);
-  assert.equal(priceFor("gpt-5", p), null);
+  assert.equal(priceFor("claude-sonnet-5-5-20261001", p).input, 2);
+  assert.equal(priceFor("claude-sonnet-5-5@20261001", p).input, 2);
+  // An unlisted variant must not inherit its base model's (cheaper) price.
+  assert.equal(priceFor("gpt-5-pro", p), null);
+  assert.equal(priceFor("claude-sonnet-5-5-preview", p), null);
+  assert.equal(priceFor("gpt-4o", p), null);
+});
+
+test("an unlisted variant of a priced model refuses the run", async () => {
+  const calls = { n: 0 };
+  await assert.rejects(runMini({ models: ["claude-haiku-4-5", "gpt-5-pro"], calls }), (err) => err.code === "REFUSED" && /gpt-5-pro/.test(err.message));
+  assert.equal(calls.n, 0);
 });
 
 test("estimate counts the full output cap per call", () => {
