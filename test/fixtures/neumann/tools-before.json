@@ -1,0 +1,5366 @@
+{
+ "tools": [
+  {
+   "name": "run_simulation",
+   "title": "Run a Monte Carlo simulation",
+   "description": "Runs a Monte Carlo simulation over a graph of probabilistic root and calculated nodes, returning the full output distribution instead of one guessed number. Use this when you need the range and likelihood of outcomes for a plan driven by uncertain inputs, not just its average case. Both tiers run to completion and return the full result in this same call, never a run_id to poll. Example: {\"graph\":{\"root_nodes\":[{\"id\":\"root\",\"distribution_type\":\"normal\",\"distribution_params\":{\"mean\":100,\"std\":15}}],\"calc_nodes\":[{\"id\":\"out\",\"formula\":\"{e1}\"}],\"edges\":[{\"id\":\"e1\",\"source\":\"root\",\"target\":\"out\"}],\"run_params\":{\"trials\":1000,\"time_periods\":12}}} Cost: an anonymous call spends 1 of 3 free runs per UTC calendar day and must fit the anonymous caps (1,000 trials, 20 nodes); an authenticated account is charged credits instead. Every result's billing block reports which, and what is left.",
+   "inputSchema": {
+    "$defs": {
+     "AggregationRequest": {
+      "additionalProperties": false,
+      "description": "A post-simulation, series-aware metric over one node's full series.\n\nNPV/IRR/payback/CAGR/cumsum are NOT per-period node values: they consume a\ntarget node's complete ``(time_periods x trials)`` matrix AFTER the run and\nreturn one value per trial, summarised into a distribution.\n\nDiscount convention (0-based series index): period ``t=0`` is the present\n(undiscounted) cash flow; period ``t`` is discounted by ``(1+rate)**t``. The\nfirst period is undiscounted.\n\nWarning — two discount conventions coexist; do not mix them. These\naggregations use the **0-based** series index above (first period\nundiscounted). The per-period formula functions ``DISCOUNT(rate,\n{time_period})`` and ``PV(rate, value, {time_period})`` use the **1-based**\n``{time_period}``, so they discount the first period by ``(1+rate)**1``.\n\n\"Investment at period 0\" pattern: model an up-front outlay as a negative\nperiod-0 cash flow in the target node's series; NPV's t=0-undiscounted\nconvention then treats it as the present-value outlay. Do not additionally\ndiscount that first period with ``PV(...,{time_period})`` inside the target\nnode's formula when also requesting an aggregation ``npv`` — combining the\n1-based per-period discount with the 0-based ``npv`` double-shifts the first\nperiod.\n\nPer-period node vs aggregate metric (``prob``): pointing ``prob`` at a\nmulti-period cash-flow NODE via ``target_node_id`` thresholds only that node's\nFINAL-period per-trial value — i.e. ``P(per-period value > x)``, NOT\n``P(NPV > x)``. To get a true ``P(NPV > 0)``, define an ``npv`` aggregation\nfirst, then add a ``prob`` aggregation whose ``target_aggregation_id`` points\nat that ``npv`` id; ``prob`` then thresholds the NPV per-trial vector directly.\nA ``prob`` request targets EITHER a node (``target_node_id``) OR an earlier\naggregation (``target_aggregation_id``) — exactly one, never both.",
+      "properties": {
+       "id": {
+        "description": "Result key for this metric (unique within the request).",
+        "title": "Id",
+        "type": "string"
+       },
+       "target_node_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The node whose full per-period series the metric consumes. Required for every metric except a ``prob`` that targets a prior aggregation via ``target_aggregation_id``. Exactly one of ``target_node_id`` / ``target_aggregation_id`` may be set on a ``prob`` request.",
+        "title": "Target Node Id"
+       },
+       "target_aggregation_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "For a ``prob`` request only: the id of an aggregation defined EARLIER in this output_request whose per-trial vector (e.g. an ``npv``) is thresholded. Lets ``P(NPV > 0)`` be expressed directly instead of the per-period ``P(value > x)`` you get by targeting a multi-period node. The referenced aggregation must produce a per-trial vector (npv/irr/payback/discounted_payback/cagr/cumsum/terminal_value/mirr).",
+        "title": "Target Aggregation Id"
+       },
+       "function": {
+        "description": "One of: npv, irr, payback, discounted_payback, cagr, cumsum, prob, terminal_value, mirr. discounted_payback requires params.rate; npv requires params.rate OR a per-period params.rates curve; prob requires params.op (one of >, >=, <, <=, ==) and params.value; terminal_value requires params.g and params.rate; mirr requires params.finance_rate and params.reinvest_rate.",
+        "title": "Function",
+        "type": "string"
+       },
+       "params": {
+        "additionalProperties": true,
+        "description": "Function params, e.g. {'rate': 0.1} for npv/discounted_payback, {'op': '>', 'value': 0} for prob, {'g': 0.02, 'rate': 0.1} for terminal_value, {'finance_rate': 0.1, 'reinvest_rate': 0.08} for mirr.",
+        "title": "Params",
+        "type": "object"
+       }
+      },
+      "required": [
+       "id",
+       "function"
+      ],
+      "title": "AggregationRequest",
+      "type": "object"
+     },
+     "CalcNode": {
+      "additionalProperties": false,
+      "description": "A computed node. ``formula`` is OPTIONAL.\n\nA null/empty/whitespace formula is allowed: the node is treated as a\nconstant ``0`` every period/trial (incoming edges are ignored — there is no\nimplicit \"sum of incoming edges\"). ``validate_graph`` surfaces this as a\nWARNING, not an error. To sum incoming edges, write the sum explicitly,\ne.g. ``{e1}+{e2}``; for pass-through use ``{e1}``.",
+      "properties": {
+       "id": {
+        "description": "Unique node id within the graph.",
+        "title": "Id",
+        "type": "string"
+       },
+       "name": {
+        "default": "",
+        "description": "Human-readable label.",
+        "title": "Name",
+        "type": "string"
+       },
+       "formula": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Optional expression over incoming edge ids, e.g. '{e1} * 0.5 + {e2}'. To sum incoming edges write '{e1}+{e2}'; for pass-through use '{e1}'. If omitted/empty the node is treated as a constant 0 (sum-of-incoming is not implied); validate_graph reports this as a warning.",
+        "title": "Formula"
+       }
+      },
+      "required": [
+       "id"
+      ],
+      "title": "CalcNode",
+      "type": "object"
+     },
+     "Edge": {
+      "additionalProperties": false,
+      "description": "A directed connection carrying a value from source to target.",
+      "properties": {
+       "id": {
+        "description": "Unique edge id within the graph.",
+        "title": "Id",
+        "type": "string"
+       },
+       "source": {
+        "description": "id of the source node.",
+        "title": "Source",
+        "type": "string"
+       },
+       "target": {
+        "description": "id of the target node.",
+        "title": "Target",
+        "type": "string"
+       },
+       "delay": {
+        "default": 0,
+        "description": "Periods the value is delayed in transit.",
+        "minimum": 0,
+        "title": "Delay",
+        "type": "integer"
+       },
+       "name": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Optional label.",
+        "title": "Name"
+       }
+      },
+      "required": [
+       "id",
+       "source",
+       "target"
+      ],
+      "title": "Edge",
+      "type": "object"
+     },
+     "OutputRequest": {
+      "additionalProperties": false,
+      "description": "Which nodes/edges/periods to include in the result.\n\nEmpty lists mean 'all': all nodes, all edges, all time periods.\n``aggregations`` requests post-simulation series metrics (NPV/IRR/...).",
+      "properties": {
+       "nodes": {
+        "items": {
+         "type": "string"
+        },
+        "title": "Nodes",
+        "type": "array"
+       },
+       "edges": {
+        "items": {
+         "type": "string"
+        },
+        "title": "Edges",
+        "type": "array"
+       },
+       "time_periods": {
+        "items": {
+         "type": "integer"
+        },
+        "title": "Time Periods",
+        "type": "array"
+       },
+       "aggregations": {
+        "items": {
+         "$ref": "#/$defs/AggregationRequest"
+        },
+        "title": "Aggregations",
+        "type": "array"
+       }
+      },
+      "title": "OutputRequest",
+      "type": "object"
+     },
+     "PublicGraph": {
+      "additionalProperties": false,
+      "description": "A complete, validated simulation request — the agent-facing input.\n\nThis is the canonical public shape. Reference integrity (edges point at real\nnodes, output_request references real ids) is validated here so malformed\ngraphs are rejected before they ever reach the engine.",
+      "properties": {
+       "contract_version": {
+        "const": "1.0",
+        "default": "1.0",
+        "description": "Schema version this graph targets.",
+        "title": "Contract Version",
+        "type": "string"
+       },
+       "root_nodes": {
+        "items": {
+         "$ref": "#/$defs/RootNode"
+        },
+        "title": "Root Nodes",
+        "type": "array"
+       },
+       "calc_nodes": {
+        "items": {
+         "$ref": "#/$defs/CalcNode"
+        },
+        "title": "Calc Nodes",
+        "type": "array"
+       },
+       "edges": {
+        "items": {
+         "$ref": "#/$defs/Edge"
+        },
+        "title": "Edges",
+        "type": "array"
+       },
+       "run_params": {
+        "$ref": "#/$defs/RunParams"
+       }
+      },
+      "required": [
+       "run_params"
+      ],
+      "title": "PublicGraph",
+      "type": "object"
+     },
+     "RootNode": {
+      "additionalProperties": false,
+      "description": "A source node that samples from a probability distribution each period.",
+      "properties": {
+       "id": {
+        "description": "Unique node id within the graph.",
+        "title": "Id",
+        "type": "string"
+       },
+       "name": {
+        "default": "",
+        "description": "Human-readable label.",
+        "title": "Name",
+        "type": "string"
+       },
+       "distribution_type": {
+        "description": "One of the catalog distributions (GET /api/v1/contract).",
+        "title": "Distribution Type",
+        "type": "string"
+       },
+       "distribution_params": {
+        "additionalProperties": true,
+        "description": "Params for the chosen distribution, e.g. {'mean': 100, 'std': 15}.",
+        "title": "Distribution Params",
+        "type": "object"
+       },
+       "interval": {
+        "default": 1,
+        "description": "Sample every N periods (1 = every period).",
+        "minimum": 0,
+        "title": "Interval",
+        "type": "integer"
+       },
+       "delay": {
+        "default": 0,
+        "description": "Periods to wait before the first sample.",
+        "minimum": 0,
+        "title": "Delay",
+        "type": "integer"
+       },
+       "sampling_frequency": {
+        "default": "per_period",
+        "description": "'once' draws a single value reused across periods.",
+        "enum": [
+         "per_period",
+         "once"
+        ],
+        "title": "Sampling Frequency",
+        "type": "string"
+       }
+      },
+      "required": [
+       "id",
+       "distribution_type",
+       "distribution_params"
+      ],
+      "title": "RootNode",
+      "type": "object"
+     },
+     "RunParams": {
+      "additionalProperties": false,
+      "description": "Top-level run configuration.",
+      "properties": {
+       "trials": {
+        "description": "Number of Monte Carlo trials.",
+        "exclusiveMinimum": 0,
+        "title": "Trials",
+        "type": "integer"
+       },
+       "time_periods": {
+        "description": "Number of time periods to simulate.",
+        "exclusiveMinimum": 0,
+        "title": "Time Periods",
+        "type": "integer"
+       },
+       "output_request": {
+        "$ref": "#/$defs/OutputRequest"
+       }
+      },
+      "required": [
+       "trials",
+       "time_periods"
+      ],
+      "title": "RunParams",
+      "type": "object"
+     }
+    },
+    "description": "Arguments for ``run_simulation``.",
+    "properties": {
+     "graph": {
+      "$ref": "#/$defs/PublicGraph",
+      "description": "The full simulation graph (root_nodes, calc_nodes, edges, run_params). See GET /api/v1/contract for valid distribution types."
+     },
+     "seed": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Optional RNG seed; reproducible only on the small/inline path.",
+      "title": "Seed"
+     },
+     "include_histogram": {
+      "default": false,
+      "description": "Include a per-element histogram in each summary element.",
+      "title": "Include Histogram",
+      "type": "boolean"
+     },
+     "api_key": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Your API key from POST /api/v1/accounts. Debits credits per run. Omit to use the free anonymous allowance, which IS accounted: a bounded number of runs per UTC calendar day within the anonymous size caps. Every result's billing block reports what the call was charged to and what is left; call whoami for the exact numbers.",
+      "title": "Api Key"
+     }
+    },
+    "required": [
+     "graph"
+    ],
+    "title": "RunSimulationInput",
+    "type": "object"
+   },
+   "outputSchema": {
+    "$defs": {
+     "AnonymousLimits": {
+      "description": "The anonymous tier's hard bounds, rendered from ``Settings``.",
+      "properties": {
+       "runs_per_day": {
+        "description": "Simulation runs per UTC calendar day.",
+        "title": "Runs Per Day",
+        "type": "integer"
+       },
+       "max_trials": {
+        "description": "Maximum trials in a single anonymous run.",
+        "title": "Max Trials",
+        "type": "integer"
+       },
+       "max_nodes": {
+        "description": "Maximum nodes in an anonymous graph.",
+        "title": "Max Nodes",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "runs_per_day",
+       "max_trials",
+       "max_nodes"
+      ],
+      "title": "AnonymousLimits",
+      "type": "object"
+     },
+     "BasicStats": {
+      "description": "Summary statistics for one element at one time period.",
+      "properties": {
+       "mean": {
+        "title": "Mean",
+        "type": "number"
+       },
+       "std": {
+        "title": "Std",
+        "type": "number"
+       },
+       "min": {
+        "title": "Min",
+        "type": "number"
+       },
+       "max": {
+        "title": "Max",
+        "type": "number"
+       }
+      },
+      "required": [
+       "mean",
+       "std",
+       "min",
+       "max"
+      ],
+      "title": "BasicStats",
+      "type": "object"
+     },
+     "BillingInfo": {
+      "description": "Who the caller is and what this call cost them.\n\nPresent on every tool result. Read ``charged_to`` for the verdict and\n``credits_debited`` / ``anonymous_runs_remaining_today`` for the amount.",
+      "properties": {
+       "principal": {
+        "description": "'account' when a credential resolved, else 'anonymous'.",
+        "enum": [
+         "anonymous",
+         "account"
+        ],
+        "title": "Principal",
+        "type": "string"
+       },
+       "account_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The resolved account id, or null when anonymous.",
+        "title": "Account Id"
+       },
+       "account_status": {
+        "anyOf": [
+         {
+          "enum": [
+           "matched",
+           "created"
+          ],
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "'matched' when an existing account was resolved, 'created' when this call auto-created one (OAuth first call). Null when anonymous.",
+        "title": "Account Status"
+       },
+       "auth_source": {
+        "description": "How the caller was identified: 'bearer' (Authorization: Bearer nmn_oat_/nmn_pat_), 'api_key' (the api_key tool argument), or 'anonymous' (no credential).",
+        "enum": [
+         "bearer",
+         "api_key",
+         "anonymous"
+        ],
+        "title": "Auth Source",
+        "type": "string"
+       },
+       "charged_to": {
+        "description": "What this call was billed against: 'anonymous_allowance' (one free daily run), 'credits' (the account ledger), or 'none' (free).",
+        "enum": [
+         "anonymous_allowance",
+         "credits",
+         "none"
+        ],
+        "title": "Charged To",
+        "type": "string"
+       },
+       "credits_debited": {
+        "default": 0,
+        "description": "Credits this call debited (0 for a free call).",
+        "title": "Credits Debited",
+        "type": "integer"
+       },
+       "credit_balance": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The account's credit balance AFTER this call. Null when anonymous.",
+        "title": "Credit Balance"
+       },
+       "anonymous_runs_remaining_today": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Free anonymous runs left in the current UTC day, counting this call. Null when the caller is an account (the allowance does not apply).",
+        "title": "Anonymous Runs Remaining Today"
+       },
+       "anonymous_limits": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/AnonymousLimits"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The anonymous tier's bounds. Null when the caller is an account."
+       },
+       "anonymous_allowance_resets_at": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "ISO-8601 instant the anonymous allowance next refills (the next UTC midnight). Null when the caller is an account.",
+        "title": "Anonymous Allowance Resets At"
+       }
+      },
+      "required": [
+       "principal",
+       "auth_source",
+       "charged_to"
+      ],
+      "title": "BillingInfo",
+      "type": "object"
+     },
+     "Histogram": {
+      "description": "Optional histogram of the trial values for one element.",
+      "properties": {
+       "counts": {
+        "items": {
+         "type": "integer"
+        },
+        "title": "Counts",
+        "type": "array"
+       },
+       "bins": {
+        "items": {
+         "type": "number"
+        },
+        "title": "Bins",
+        "type": "array"
+       }
+      },
+      "required": [
+       "counts",
+       "bins"
+      ],
+      "title": "Histogram",
+      "type": "object"
+     },
+     "Percentiles": {
+      "description": "Distribution percentiles for one element at one time period.",
+      "properties": {
+       "p10": {
+        "title": "P10",
+        "type": "number"
+       },
+       "p25": {
+        "title": "P25",
+        "type": "number"
+       },
+       "p50": {
+        "title": "P50",
+        "type": "number"
+       },
+       "p75": {
+        "title": "P75",
+        "type": "number"
+       },
+       "p90": {
+        "title": "P90",
+        "type": "number"
+       }
+      },
+      "required": [
+       "p10",
+       "p25",
+       "p50",
+       "p75",
+       "p90"
+      ],
+      "title": "Percentiles",
+      "type": "object"
+     },
+     "SimulationResult": {
+      "description": "The agent-facing result of a simulation run.\n\n``summary_statistics`` carries one entry per requested time period. Each\nelement is reduced to percentiles + basic stats, with optional histogram and\nraw per-trial arrays.",
+      "properties": {
+       "contract_version": {
+        "const": "1.0",
+        "default": "1.0",
+        "title": "Contract Version",
+        "type": "string"
+       },
+       "trials": {
+        "title": "Trials",
+        "type": "integer"
+       },
+       "time_periods": {
+        "title": "Time Periods",
+        "type": "integer"
+       },
+       "summary_statistics": {
+        "items": {
+         "$ref": "#/$defs/SummaryTimePeriod"
+        },
+        "title": "Summary Statistics",
+        "type": "array"
+       },
+       "aggregations": {
+        "additionalProperties": {
+         "$ref": "#/$defs/SummaryElement"
+        },
+        "description": "Post-simulation series metrics, keyed by the request id. Each is the per-trial distribution (percentiles + basic stats) of NPV/IRR/etc. Undefined trials (e.g. non-convergent IRR) are dropped from the distribution, so basic_stats reflect only the finite trials.",
+        "title": "Aggregations",
+        "type": "object"
+       }
+      },
+      "required": [
+       "trials",
+       "time_periods"
+      ],
+      "title": "SimulationResult",
+      "type": "object"
+     },
+     "SummaryElement": {
+      "description": "Summarised result for a single node or edge at a single time period.",
+      "properties": {
+       "percentiles": {
+        "$ref": "#/$defs/Percentiles"
+       },
+       "basic_stats": {
+        "$ref": "#/$defs/BasicStats"
+       },
+       "histogram": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/Histogram"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null
+       },
+       "raw": {
+        "anyOf": [
+         {
+          "items": {
+           "type": "number"
+          },
+          "type": "array"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Per-trial values; only present when raw output is requested.",
+        "title": "Raw"
+       }
+      },
+      "required": [
+       "percentiles",
+       "basic_stats"
+      ],
+      "title": "SummaryElement",
+      "type": "object"
+     },
+     "SummaryTimePeriod": {
+      "description": "All summarised nodes/edges for a single time period.",
+      "properties": {
+       "time_period": {
+        "title": "Time Period",
+        "type": "integer"
+       },
+       "nodes": {
+        "additionalProperties": {
+         "$ref": "#/$defs/SummaryElement"
+        },
+        "title": "Nodes",
+        "type": "object"
+       },
+       "edges": {
+        "additionalProperties": {
+         "$ref": "#/$defs/SummaryElement"
+        },
+        "title": "Edges",
+        "type": "object"
+       }
+      },
+      "required": [
+       "time_period"
+      ],
+      "title": "SummaryTimePeriod",
+      "type": "object"
+     }
+    },
+    "description": "Result of ``run_simulation``.\n\nBoth tiers run to completion and carry the full summarised\n``SimulationResult``. The small tier runs inline; the large tier fans across\nthe local multiprocessing pool — either way the tool blocks until the run\nfinishes (seconds) and returns the real result with aggregations.",
+    "properties": {
+     "billing": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/BillingInfo"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Who you are and what this call cost: principal, auth source, credits debited and balance, or the anonymous allowance left today."
+     },
+     "run_id": {
+      "title": "Run Id",
+      "type": "string"
+     },
+     "status": {
+      "description": "Always 'completed' on a 2xx response. A run that fails propagates as an error response (non-2xx + error envelope), not a 'failed' result.",
+      "title": "Status",
+      "type": "string"
+     },
+     "tier": {
+      "description": "'small' or 'large'.",
+      "title": "Tier",
+      "type": "string"
+     },
+     "total_trials": {
+      "title": "Total Trials",
+      "type": "integer"
+     },
+     "credits_debited": {
+      "default": 0,
+      "description": "Credits charged to the account (0 for anonymous).",
+      "title": "Credits Debited",
+      "type": "integer"
+     },
+     "result": {
+      "$ref": "#/$defs/SimulationResult",
+      "description": "The summarised result with aggregations."
+     }
+    },
+    "required": [
+     "run_id",
+     "status",
+     "tier",
+     "total_trials",
+     "result"
+    ],
+    "title": "RunSimulationResult",
+    "type": "object"
+   },
+   "annotations": {
+    "title": "Run a Monte Carlo simulation",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "oat_sensitivity",
+   "title": "Run a tornado sensitivity analysis",
+   "description": "Runs a one-at-a-time tornado sensitivity analysis: sweeps each root node over a set of quantiles (others held at baseline) and measures how the target node responds, ranked by impact. Use this when you need to know which uncertain input most drives an outcome, so you know what to de-risk or estimate more carefully first. Example: {\"graph\":{\"root_nodes\":[{\"id\":\"root\",\"distribution_type\":\"normal\",\"distribution_params\":{\"mean\":100,\"std\":15}}],\"calc_nodes\":[{\"id\":\"out\",\"formula\":\"{e1}\"}],\"edges\":[{\"id\":\"e1\",\"source\":\"root\",\"target\":\"out\"}],\"run_params\":{\"trials\":1000,\"time_periods\":12}}} Cost: an anonymous call spends 1 of 3 free runs per UTC calendar day and must fit the anonymous caps (1,000 trials, 20 nodes); an authenticated account is charged credits instead. Every result's billing block reports which, and what is left.",
+   "inputSchema": {
+    "$defs": {
+     "AggregationRequest": {
+      "additionalProperties": false,
+      "description": "A post-simulation, series-aware metric over one node's full series.\n\nNPV/IRR/payback/CAGR/cumsum are NOT per-period node values: they consume a\ntarget node's complete ``(time_periods x trials)`` matrix AFTER the run and\nreturn one value per trial, summarised into a distribution.\n\nDiscount convention (0-based series index): period ``t=0`` is the present\n(undiscounted) cash flow; period ``t`` is discounted by ``(1+rate)**t``. The\nfirst period is undiscounted.\n\nWarning — two discount conventions coexist; do not mix them. These\naggregations use the **0-based** series index above (first period\nundiscounted). The per-period formula functions ``DISCOUNT(rate,\n{time_period})`` and ``PV(rate, value, {time_period})`` use the **1-based**\n``{time_period}``, so they discount the first period by ``(1+rate)**1``.\n\n\"Investment at period 0\" pattern: model an up-front outlay as a negative\nperiod-0 cash flow in the target node's series; NPV's t=0-undiscounted\nconvention then treats it as the present-value outlay. Do not additionally\ndiscount that first period with ``PV(...,{time_period})`` inside the target\nnode's formula when also requesting an aggregation ``npv`` — combining the\n1-based per-period discount with the 0-based ``npv`` double-shifts the first\nperiod.\n\nPer-period node vs aggregate metric (``prob``): pointing ``prob`` at a\nmulti-period cash-flow NODE via ``target_node_id`` thresholds only that node's\nFINAL-period per-trial value — i.e. ``P(per-period value > x)``, NOT\n``P(NPV > x)``. To get a true ``P(NPV > 0)``, define an ``npv`` aggregation\nfirst, then add a ``prob`` aggregation whose ``target_aggregation_id`` points\nat that ``npv`` id; ``prob`` then thresholds the NPV per-trial vector directly.\nA ``prob`` request targets EITHER a node (``target_node_id``) OR an earlier\naggregation (``target_aggregation_id``) — exactly one, never both.",
+      "properties": {
+       "id": {
+        "description": "Result key for this metric (unique within the request).",
+        "title": "Id",
+        "type": "string"
+       },
+       "target_node_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The node whose full per-period series the metric consumes. Required for every metric except a ``prob`` that targets a prior aggregation via ``target_aggregation_id``. Exactly one of ``target_node_id`` / ``target_aggregation_id`` may be set on a ``prob`` request.",
+        "title": "Target Node Id"
+       },
+       "target_aggregation_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "For a ``prob`` request only: the id of an aggregation defined EARLIER in this output_request whose per-trial vector (e.g. an ``npv``) is thresholded. Lets ``P(NPV > 0)`` be expressed directly instead of the per-period ``P(value > x)`` you get by targeting a multi-period node. The referenced aggregation must produce a per-trial vector (npv/irr/payback/discounted_payback/cagr/cumsum/terminal_value/mirr).",
+        "title": "Target Aggregation Id"
+       },
+       "function": {
+        "description": "One of: npv, irr, payback, discounted_payback, cagr, cumsum, prob, terminal_value, mirr. discounted_payback requires params.rate; npv requires params.rate OR a per-period params.rates curve; prob requires params.op (one of >, >=, <, <=, ==) and params.value; terminal_value requires params.g and params.rate; mirr requires params.finance_rate and params.reinvest_rate.",
+        "title": "Function",
+        "type": "string"
+       },
+       "params": {
+        "additionalProperties": true,
+        "description": "Function params, e.g. {'rate': 0.1} for npv/discounted_payback, {'op': '>', 'value': 0} for prob, {'g': 0.02, 'rate': 0.1} for terminal_value, {'finance_rate': 0.1, 'reinvest_rate': 0.08} for mirr.",
+        "title": "Params",
+        "type": "object"
+       }
+      },
+      "required": [
+       "id",
+       "function"
+      ],
+      "title": "AggregationRequest",
+      "type": "object"
+     },
+     "CalcNode": {
+      "additionalProperties": false,
+      "description": "A computed node. ``formula`` is OPTIONAL.\n\nA null/empty/whitespace formula is allowed: the node is treated as a\nconstant ``0`` every period/trial (incoming edges are ignored — there is no\nimplicit \"sum of incoming edges\"). ``validate_graph`` surfaces this as a\nWARNING, not an error. To sum incoming edges, write the sum explicitly,\ne.g. ``{e1}+{e2}``; for pass-through use ``{e1}``.",
+      "properties": {
+       "id": {
+        "description": "Unique node id within the graph.",
+        "title": "Id",
+        "type": "string"
+       },
+       "name": {
+        "default": "",
+        "description": "Human-readable label.",
+        "title": "Name",
+        "type": "string"
+       },
+       "formula": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Optional expression over incoming edge ids, e.g. '{e1} * 0.5 + {e2}'. To sum incoming edges write '{e1}+{e2}'; for pass-through use '{e1}'. If omitted/empty the node is treated as a constant 0 (sum-of-incoming is not implied); validate_graph reports this as a warning.",
+        "title": "Formula"
+       }
+      },
+      "required": [
+       "id"
+      ],
+      "title": "CalcNode",
+      "type": "object"
+     },
+     "Edge": {
+      "additionalProperties": false,
+      "description": "A directed connection carrying a value from source to target.",
+      "properties": {
+       "id": {
+        "description": "Unique edge id within the graph.",
+        "title": "Id",
+        "type": "string"
+       },
+       "source": {
+        "description": "id of the source node.",
+        "title": "Source",
+        "type": "string"
+       },
+       "target": {
+        "description": "id of the target node.",
+        "title": "Target",
+        "type": "string"
+       },
+       "delay": {
+        "default": 0,
+        "description": "Periods the value is delayed in transit.",
+        "minimum": 0,
+        "title": "Delay",
+        "type": "integer"
+       },
+       "name": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Optional label.",
+        "title": "Name"
+       }
+      },
+      "required": [
+       "id",
+       "source",
+       "target"
+      ],
+      "title": "Edge",
+      "type": "object"
+     },
+     "OutputRequest": {
+      "additionalProperties": false,
+      "description": "Which nodes/edges/periods to include in the result.\n\nEmpty lists mean 'all': all nodes, all edges, all time periods.\n``aggregations`` requests post-simulation series metrics (NPV/IRR/...).",
+      "properties": {
+       "nodes": {
+        "items": {
+         "type": "string"
+        },
+        "title": "Nodes",
+        "type": "array"
+       },
+       "edges": {
+        "items": {
+         "type": "string"
+        },
+        "title": "Edges",
+        "type": "array"
+       },
+       "time_periods": {
+        "items": {
+         "type": "integer"
+        },
+        "title": "Time Periods",
+        "type": "array"
+       },
+       "aggregations": {
+        "items": {
+         "$ref": "#/$defs/AggregationRequest"
+        },
+        "title": "Aggregations",
+        "type": "array"
+       }
+      },
+      "title": "OutputRequest",
+      "type": "object"
+     },
+     "PublicGraph": {
+      "additionalProperties": false,
+      "description": "A complete, validated simulation request — the agent-facing input.\n\nThis is the canonical public shape. Reference integrity (edges point at real\nnodes, output_request references real ids) is validated here so malformed\ngraphs are rejected before they ever reach the engine.",
+      "properties": {
+       "contract_version": {
+        "const": "1.0",
+        "default": "1.0",
+        "description": "Schema version this graph targets.",
+        "title": "Contract Version",
+        "type": "string"
+       },
+       "root_nodes": {
+        "items": {
+         "$ref": "#/$defs/RootNode"
+        },
+        "title": "Root Nodes",
+        "type": "array"
+       },
+       "calc_nodes": {
+        "items": {
+         "$ref": "#/$defs/CalcNode"
+        },
+        "title": "Calc Nodes",
+        "type": "array"
+       },
+       "edges": {
+        "items": {
+         "$ref": "#/$defs/Edge"
+        },
+        "title": "Edges",
+        "type": "array"
+       },
+       "run_params": {
+        "$ref": "#/$defs/RunParams"
+       }
+      },
+      "required": [
+       "run_params"
+      ],
+      "title": "PublicGraph",
+      "type": "object"
+     },
+     "RootNode": {
+      "additionalProperties": false,
+      "description": "A source node that samples from a probability distribution each period.",
+      "properties": {
+       "id": {
+        "description": "Unique node id within the graph.",
+        "title": "Id",
+        "type": "string"
+       },
+       "name": {
+        "default": "",
+        "description": "Human-readable label.",
+        "title": "Name",
+        "type": "string"
+       },
+       "distribution_type": {
+        "description": "One of the catalog distributions (GET /api/v1/contract).",
+        "title": "Distribution Type",
+        "type": "string"
+       },
+       "distribution_params": {
+        "additionalProperties": true,
+        "description": "Params for the chosen distribution, e.g. {'mean': 100, 'std': 15}.",
+        "title": "Distribution Params",
+        "type": "object"
+       },
+       "interval": {
+        "default": 1,
+        "description": "Sample every N periods (1 = every period).",
+        "minimum": 0,
+        "title": "Interval",
+        "type": "integer"
+       },
+       "delay": {
+        "default": 0,
+        "description": "Periods to wait before the first sample.",
+        "minimum": 0,
+        "title": "Delay",
+        "type": "integer"
+       },
+       "sampling_frequency": {
+        "default": "per_period",
+        "description": "'once' draws a single value reused across periods.",
+        "enum": [
+         "per_period",
+         "once"
+        ],
+        "title": "Sampling Frequency",
+        "type": "string"
+       }
+      },
+      "required": [
+       "id",
+       "distribution_type",
+       "distribution_params"
+      ],
+      "title": "RootNode",
+      "type": "object"
+     },
+     "RunParams": {
+      "additionalProperties": false,
+      "description": "Top-level run configuration.",
+      "properties": {
+       "trials": {
+        "description": "Number of Monte Carlo trials.",
+        "exclusiveMinimum": 0,
+        "title": "Trials",
+        "type": "integer"
+       },
+       "time_periods": {
+        "description": "Number of time periods to simulate.",
+        "exclusiveMinimum": 0,
+        "title": "Time Periods",
+        "type": "integer"
+       },
+       "output_request": {
+        "$ref": "#/$defs/OutputRequest"
+       }
+      },
+      "required": [
+       "trials",
+       "time_periods"
+      ],
+      "title": "RunParams",
+      "type": "object"
+     }
+    },
+    "description": "Arguments for ``oat_sensitivity`` (one-at-a-time tornado analysis).",
+    "properties": {
+     "graph": {
+      "$ref": "#/$defs/PublicGraph",
+      "description": "The full simulation graph to analyse (same shape as run_simulation)."
+     },
+     "target_node_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "The output node to measure. Defaults to the graph's last calc node (the usual goal node).",
+      "title": "Target Node Id"
+     },
+     "time_period": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "0-based time period to analyse. Defaults to the last period (time_periods - 1).",
+      "title": "Time Period"
+     },
+     "quantiles": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "number"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Explicit quantiles to sweep each input over (0..1). Mutually exclusive with num_quantiles. Default: [0.05, 0.5, 0.95] (tornado).",
+      "title": "Quantiles"
+     },
+     "num_quantiles": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Even count (2-10) of symmetrical quantiles around the 0.5 baseline. Mutually exclusive with quantiles.",
+      "title": "Num Quantiles"
+     },
+     "seed": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Optional RNG seed for reproducible perturbed runs.",
+      "title": "Seed"
+     },
+     "api_key": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Your API key from POST /api/v1/accounts. Debits credits per analysis. Omit to run anonymously (free).",
+      "title": "Api Key"
+     }
+    },
+    "required": [
+     "graph"
+    ],
+    "title": "OatSensitivityInput",
+    "type": "object"
+   },
+   "outputSchema": {
+    "$defs": {
+     "AnonymousLimits": {
+      "description": "The anonymous tier's hard bounds, rendered from ``Settings``.",
+      "properties": {
+       "runs_per_day": {
+        "description": "Simulation runs per UTC calendar day.",
+        "title": "Runs Per Day",
+        "type": "integer"
+       },
+       "max_trials": {
+        "description": "Maximum trials in a single anonymous run.",
+        "title": "Max Trials",
+        "type": "integer"
+       },
+       "max_nodes": {
+        "description": "Maximum nodes in an anonymous graph.",
+        "title": "Max Nodes",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "runs_per_day",
+       "max_trials",
+       "max_nodes"
+      ],
+      "title": "AnonymousLimits",
+      "type": "object"
+     },
+     "BillingInfo": {
+      "description": "Who the caller is and what this call cost them.\n\nPresent on every tool result. Read ``charged_to`` for the verdict and\n``credits_debited`` / ``anonymous_runs_remaining_today`` for the amount.",
+      "properties": {
+       "principal": {
+        "description": "'account' when a credential resolved, else 'anonymous'.",
+        "enum": [
+         "anonymous",
+         "account"
+        ],
+        "title": "Principal",
+        "type": "string"
+       },
+       "account_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The resolved account id, or null when anonymous.",
+        "title": "Account Id"
+       },
+       "account_status": {
+        "anyOf": [
+         {
+          "enum": [
+           "matched",
+           "created"
+          ],
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "'matched' when an existing account was resolved, 'created' when this call auto-created one (OAuth first call). Null when anonymous.",
+        "title": "Account Status"
+       },
+       "auth_source": {
+        "description": "How the caller was identified: 'bearer' (Authorization: Bearer nmn_oat_/nmn_pat_), 'api_key' (the api_key tool argument), or 'anonymous' (no credential).",
+        "enum": [
+         "bearer",
+         "api_key",
+         "anonymous"
+        ],
+        "title": "Auth Source",
+        "type": "string"
+       },
+       "charged_to": {
+        "description": "What this call was billed against: 'anonymous_allowance' (one free daily run), 'credits' (the account ledger), or 'none' (free).",
+        "enum": [
+         "anonymous_allowance",
+         "credits",
+         "none"
+        ],
+        "title": "Charged To",
+        "type": "string"
+       },
+       "credits_debited": {
+        "default": 0,
+        "description": "Credits this call debited (0 for a free call).",
+        "title": "Credits Debited",
+        "type": "integer"
+       },
+       "credit_balance": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The account's credit balance AFTER this call. Null when anonymous.",
+        "title": "Credit Balance"
+       },
+       "anonymous_runs_remaining_today": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Free anonymous runs left in the current UTC day, counting this call. Null when the caller is an account (the allowance does not apply).",
+        "title": "Anonymous Runs Remaining Today"
+       },
+       "anonymous_limits": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/AnonymousLimits"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The anonymous tier's bounds. Null when the caller is an account."
+       },
+       "anonymous_allowance_resets_at": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "ISO-8601 instant the anonymous allowance next refills (the next UTC midnight). Null when the caller is an account.",
+        "title": "Anonymous Allowance Resets At"
+       }
+      },
+      "required": [
+       "principal",
+       "auth_source",
+       "charged_to"
+      ],
+      "title": "BillingInfo",
+      "type": "object"
+     },
+     "InputVariable": {
+      "description": "The perturbed input variable.",
+      "properties": {
+       "type": {
+        "title": "Type",
+        "type": "string"
+       },
+       "id": {
+        "title": "Id",
+        "type": "string"
+       },
+       "baseline_value": {
+        "title": "Baseline Value",
+        "type": "number"
+       },
+       "name": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Name"
+       }
+      },
+      "required": [
+       "type",
+       "id",
+       "baseline_value"
+      ],
+      "title": "InputVariable",
+      "type": "object"
+     },
+     "ResponseCurvePoint": {
+      "description": "One point of a variable's response curve.",
+      "properties": {
+       "quantile": {
+        "title": "Quantile",
+        "type": "number"
+       },
+       "input_value": {
+        "title": "Input Value",
+        "type": "number"
+       },
+       "output_value": {
+        "title": "Output Value",
+        "type": "number"
+       },
+       "delta_output": {
+        "title": "Delta Output",
+        "type": "number"
+       },
+       "sensitivity": {
+        "title": "Sensitivity",
+        "type": "number"
+       }
+      },
+      "required": [
+       "quantile",
+       "input_value",
+       "output_value",
+       "delta_output",
+       "sensitivity"
+      ],
+      "title": "ResponseCurvePoint",
+      "type": "object"
+     },
+     "SensitivityResult": {
+      "description": "One input variable's tornado entry.",
+      "properties": {
+       "input_variable": {
+        "$ref": "#/$defs/InputVariable"
+       },
+       "target_output": {
+        "$ref": "#/$defs/TargetOutput"
+       }
+      },
+      "required": [
+       "input_variable",
+       "target_output"
+      ],
+      "title": "SensitivityResult",
+      "type": "object"
+     },
+     "TargetOutput": {
+      "description": "The measured target output for one input variable.",
+      "properties": {
+       "node_id": {
+        "title": "Node Id",
+        "type": "string"
+       },
+       "name": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Name"
+       },
+       "time_period": {
+        "title": "Time Period",
+        "type": "integer"
+       },
+       "baseline_value": {
+        "title": "Baseline Value",
+        "type": "number"
+       },
+       "response_curve": {
+        "items": {
+         "$ref": "#/$defs/ResponseCurvePoint"
+        },
+        "title": "Response Curve",
+        "type": "array"
+       },
+       "elasticity": {
+        "title": "Elasticity",
+        "type": "number"
+       },
+       "rank": {
+        "title": "Rank",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "node_id",
+       "time_period",
+       "baseline_value",
+       "response_curve",
+       "elasticity",
+       "rank"
+      ],
+      "title": "TargetOutput",
+      "type": "object"
+     }
+    },
+    "description": "Result of ``oat_sensitivity``.\n\n``results`` is the tornado ordering: one ``SensitivityResult`` per scalar root\nnode, ranked by elasticity (rank 1 = most impactful), in rank order.",
+    "properties": {
+     "billing": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/BillingInfo"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Who you are and what this call cost: principal, auth source, credits debited and balance, or the anonymous allowance left today."
+     },
+     "target_node_id": {
+      "title": "Target Node Id",
+      "type": "string"
+     },
+     "time_period": {
+      "title": "Time Period",
+      "type": "integer"
+     },
+     "quantiles": {
+      "items": {
+       "type": "number"
+      },
+      "title": "Quantiles",
+      "type": "array"
+     },
+     "runs_executed": {
+      "description": "Simulation runs the analysis cost (1 baseline + roots×quantiles).",
+      "title": "Runs Executed",
+      "type": "integer"
+     },
+     "credits_debited": {
+      "default": 0,
+      "description": "Credits charged to the account (0 for anonymous).",
+      "title": "Credits Debited",
+      "type": "integer"
+     },
+     "results": {
+      "items": {
+       "$ref": "#/$defs/SensitivityResult"
+      },
+      "title": "Results",
+      "type": "array"
+     }
+    },
+    "required": [
+     "target_node_id",
+     "time_period",
+     "quantiles",
+     "runs_executed"
+    ],
+    "title": "OatSensitivityResult",
+    "type": "object"
+   },
+   "annotations": {
+    "title": "Run a tornado sensitivity analysis",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "scenario_analysis",
+   "title": "Summarize best/median/worst scenarios",
+   "description": "Runs a simulation once and summarises a target node's worst/median/best outcomes (any percentiles), each paired with a best-effort driving input per root node. Use this when you need a quick worst-case/median/best-case narrative for a plan rather than the full distribution. Example: {\"graph\":{\"root_nodes\":[{\"id\":\"root\",\"distribution_type\":\"normal\",\"distribution_params\":{\"mean\":100,\"std\":15}}],\"calc_nodes\":[{\"id\":\"out\",\"formula\":\"{e1}\"}],\"edges\":[{\"id\":\"e1\",\"source\":\"root\",\"target\":\"out\"}],\"run_params\":{\"trials\":1000,\"time_periods\":12}}} Cost: an anonymous call spends 1 of 3 free runs per UTC calendar day and must fit the anonymous caps (1,000 trials, 20 nodes); an authenticated account is charged credits instead. Every result's billing block reports which, and what is left.",
+   "inputSchema": {
+    "$defs": {
+     "AggregationRequest": {
+      "additionalProperties": false,
+      "description": "A post-simulation, series-aware metric over one node's full series.\n\nNPV/IRR/payback/CAGR/cumsum are NOT per-period node values: they consume a\ntarget node's complete ``(time_periods x trials)`` matrix AFTER the run and\nreturn one value per trial, summarised into a distribution.\n\nDiscount convention (0-based series index): period ``t=0`` is the present\n(undiscounted) cash flow; period ``t`` is discounted by ``(1+rate)**t``. The\nfirst period is undiscounted.\n\nWarning — two discount conventions coexist; do not mix them. These\naggregations use the **0-based** series index above (first period\nundiscounted). The per-period formula functions ``DISCOUNT(rate,\n{time_period})`` and ``PV(rate, value, {time_period})`` use the **1-based**\n``{time_period}``, so they discount the first period by ``(1+rate)**1``.\n\n\"Investment at period 0\" pattern: model an up-front outlay as a negative\nperiod-0 cash flow in the target node's series; NPV's t=0-undiscounted\nconvention then treats it as the present-value outlay. Do not additionally\ndiscount that first period with ``PV(...,{time_period})`` inside the target\nnode's formula when also requesting an aggregation ``npv`` — combining the\n1-based per-period discount with the 0-based ``npv`` double-shifts the first\nperiod.\n\nPer-period node vs aggregate metric (``prob``): pointing ``prob`` at a\nmulti-period cash-flow NODE via ``target_node_id`` thresholds only that node's\nFINAL-period per-trial value — i.e. ``P(per-period value > x)``, NOT\n``P(NPV > x)``. To get a true ``P(NPV > 0)``, define an ``npv`` aggregation\nfirst, then add a ``prob`` aggregation whose ``target_aggregation_id`` points\nat that ``npv`` id; ``prob`` then thresholds the NPV per-trial vector directly.\nA ``prob`` request targets EITHER a node (``target_node_id``) OR an earlier\naggregation (``target_aggregation_id``) — exactly one, never both.",
+      "properties": {
+       "id": {
+        "description": "Result key for this metric (unique within the request).",
+        "title": "Id",
+        "type": "string"
+       },
+       "target_node_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The node whose full per-period series the metric consumes. Required for every metric except a ``prob`` that targets a prior aggregation via ``target_aggregation_id``. Exactly one of ``target_node_id`` / ``target_aggregation_id`` may be set on a ``prob`` request.",
+        "title": "Target Node Id"
+       },
+       "target_aggregation_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "For a ``prob`` request only: the id of an aggregation defined EARLIER in this output_request whose per-trial vector (e.g. an ``npv``) is thresholded. Lets ``P(NPV > 0)`` be expressed directly instead of the per-period ``P(value > x)`` you get by targeting a multi-period node. The referenced aggregation must produce a per-trial vector (npv/irr/payback/discounted_payback/cagr/cumsum/terminal_value/mirr).",
+        "title": "Target Aggregation Id"
+       },
+       "function": {
+        "description": "One of: npv, irr, payback, discounted_payback, cagr, cumsum, prob, terminal_value, mirr. discounted_payback requires params.rate; npv requires params.rate OR a per-period params.rates curve; prob requires params.op (one of >, >=, <, <=, ==) and params.value; terminal_value requires params.g and params.rate; mirr requires params.finance_rate and params.reinvest_rate.",
+        "title": "Function",
+        "type": "string"
+       },
+       "params": {
+        "additionalProperties": true,
+        "description": "Function params, e.g. {'rate': 0.1} for npv/discounted_payback, {'op': '>', 'value': 0} for prob, {'g': 0.02, 'rate': 0.1} for terminal_value, {'finance_rate': 0.1, 'reinvest_rate': 0.08} for mirr.",
+        "title": "Params",
+        "type": "object"
+       }
+      },
+      "required": [
+       "id",
+       "function"
+      ],
+      "title": "AggregationRequest",
+      "type": "object"
+     },
+     "CalcNode": {
+      "additionalProperties": false,
+      "description": "A computed node. ``formula`` is OPTIONAL.\n\nA null/empty/whitespace formula is allowed: the node is treated as a\nconstant ``0`` every period/trial (incoming edges are ignored — there is no\nimplicit \"sum of incoming edges\"). ``validate_graph`` surfaces this as a\nWARNING, not an error. To sum incoming edges, write the sum explicitly,\ne.g. ``{e1}+{e2}``; for pass-through use ``{e1}``.",
+      "properties": {
+       "id": {
+        "description": "Unique node id within the graph.",
+        "title": "Id",
+        "type": "string"
+       },
+       "name": {
+        "default": "",
+        "description": "Human-readable label.",
+        "title": "Name",
+        "type": "string"
+       },
+       "formula": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Optional expression over incoming edge ids, e.g. '{e1} * 0.5 + {e2}'. To sum incoming edges write '{e1}+{e2}'; for pass-through use '{e1}'. If omitted/empty the node is treated as a constant 0 (sum-of-incoming is not implied); validate_graph reports this as a warning.",
+        "title": "Formula"
+       }
+      },
+      "required": [
+       "id"
+      ],
+      "title": "CalcNode",
+      "type": "object"
+     },
+     "Edge": {
+      "additionalProperties": false,
+      "description": "A directed connection carrying a value from source to target.",
+      "properties": {
+       "id": {
+        "description": "Unique edge id within the graph.",
+        "title": "Id",
+        "type": "string"
+       },
+       "source": {
+        "description": "id of the source node.",
+        "title": "Source",
+        "type": "string"
+       },
+       "target": {
+        "description": "id of the target node.",
+        "title": "Target",
+        "type": "string"
+       },
+       "delay": {
+        "default": 0,
+        "description": "Periods the value is delayed in transit.",
+        "minimum": 0,
+        "title": "Delay",
+        "type": "integer"
+       },
+       "name": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Optional label.",
+        "title": "Name"
+       }
+      },
+      "required": [
+       "id",
+       "source",
+       "target"
+      ],
+      "title": "Edge",
+      "type": "object"
+     },
+     "OutputRequest": {
+      "additionalProperties": false,
+      "description": "Which nodes/edges/periods to include in the result.\n\nEmpty lists mean 'all': all nodes, all edges, all time periods.\n``aggregations`` requests post-simulation series metrics (NPV/IRR/...).",
+      "properties": {
+       "nodes": {
+        "items": {
+         "type": "string"
+        },
+        "title": "Nodes",
+        "type": "array"
+       },
+       "edges": {
+        "items": {
+         "type": "string"
+        },
+        "title": "Edges",
+        "type": "array"
+       },
+       "time_periods": {
+        "items": {
+         "type": "integer"
+        },
+        "title": "Time Periods",
+        "type": "array"
+       },
+       "aggregations": {
+        "items": {
+         "$ref": "#/$defs/AggregationRequest"
+        },
+        "title": "Aggregations",
+        "type": "array"
+       }
+      },
+      "title": "OutputRequest",
+      "type": "object"
+     },
+     "PublicGraph": {
+      "additionalProperties": false,
+      "description": "A complete, validated simulation request — the agent-facing input.\n\nThis is the canonical public shape. Reference integrity (edges point at real\nnodes, output_request references real ids) is validated here so malformed\ngraphs are rejected before they ever reach the engine.",
+      "properties": {
+       "contract_version": {
+        "const": "1.0",
+        "default": "1.0",
+        "description": "Schema version this graph targets.",
+        "title": "Contract Version",
+        "type": "string"
+       },
+       "root_nodes": {
+        "items": {
+         "$ref": "#/$defs/RootNode"
+        },
+        "title": "Root Nodes",
+        "type": "array"
+       },
+       "calc_nodes": {
+        "items": {
+         "$ref": "#/$defs/CalcNode"
+        },
+        "title": "Calc Nodes",
+        "type": "array"
+       },
+       "edges": {
+        "items": {
+         "$ref": "#/$defs/Edge"
+        },
+        "title": "Edges",
+        "type": "array"
+       },
+       "run_params": {
+        "$ref": "#/$defs/RunParams"
+       }
+      },
+      "required": [
+       "run_params"
+      ],
+      "title": "PublicGraph",
+      "type": "object"
+     },
+     "RootNode": {
+      "additionalProperties": false,
+      "description": "A source node that samples from a probability distribution each period.",
+      "properties": {
+       "id": {
+        "description": "Unique node id within the graph.",
+        "title": "Id",
+        "type": "string"
+       },
+       "name": {
+        "default": "",
+        "description": "Human-readable label.",
+        "title": "Name",
+        "type": "string"
+       },
+       "distribution_type": {
+        "description": "One of the catalog distributions (GET /api/v1/contract).",
+        "title": "Distribution Type",
+        "type": "string"
+       },
+       "distribution_params": {
+        "additionalProperties": true,
+        "description": "Params for the chosen distribution, e.g. {'mean': 100, 'std': 15}.",
+        "title": "Distribution Params",
+        "type": "object"
+       },
+       "interval": {
+        "default": 1,
+        "description": "Sample every N periods (1 = every period).",
+        "minimum": 0,
+        "title": "Interval",
+        "type": "integer"
+       },
+       "delay": {
+        "default": 0,
+        "description": "Periods to wait before the first sample.",
+        "minimum": 0,
+        "title": "Delay",
+        "type": "integer"
+       },
+       "sampling_frequency": {
+        "default": "per_period",
+        "description": "'once' draws a single value reused across periods.",
+        "enum": [
+         "per_period",
+         "once"
+        ],
+        "title": "Sampling Frequency",
+        "type": "string"
+       }
+      },
+      "required": [
+       "id",
+       "distribution_type",
+       "distribution_params"
+      ],
+      "title": "RootNode",
+      "type": "object"
+     },
+     "RunParams": {
+      "additionalProperties": false,
+      "description": "Top-level run configuration.",
+      "properties": {
+       "trials": {
+        "description": "Number of Monte Carlo trials.",
+        "exclusiveMinimum": 0,
+        "title": "Trials",
+        "type": "integer"
+       },
+       "time_periods": {
+        "description": "Number of time periods to simulate.",
+        "exclusiveMinimum": 0,
+        "title": "Time Periods",
+        "type": "integer"
+       },
+       "output_request": {
+        "$ref": "#/$defs/OutputRequest"
+       }
+      },
+      "required": [
+       "trials",
+       "time_periods"
+      ],
+      "title": "RunParams",
+      "type": "object"
+     }
+    },
+    "description": "Arguments for ``scenario_analysis`` (best/median/worst across trials).",
+    "properties": {
+     "graph": {
+      "$ref": "#/$defs/PublicGraph",
+      "description": "The full simulation graph (same shape as run_simulation)."
+     },
+     "target_node_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "The output node to summarise. Defaults to the graph's last calc node (the usual goal node).",
+      "title": "Target Node Id"
+     },
+     "time_period": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "0-based time period to analyse. Defaults to the last period (time_periods - 1).",
+      "title": "Time Period"
+     },
+     "percentiles": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "number"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Scenario percentiles in [0,1]. Default [0.0, 0.5, 1.0] = worst / median / best.",
+      "title": "Percentiles"
+     },
+     "seed": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Optional RNG seed for a reproducible run.",
+      "title": "Seed"
+     },
+     "api_key": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Your API key from POST /api/v1/accounts. Debits credits per analysis (priced like one run). Omit to run anonymously (free).",
+      "title": "Api Key"
+     }
+    },
+    "required": [
+     "graph"
+    ],
+    "title": "ScenarioAnalysisInput",
+    "type": "object"
+   },
+   "outputSchema": {
+    "$defs": {
+     "AnonymousLimits": {
+      "description": "The anonymous tier's hard bounds, rendered from ``Settings``.",
+      "properties": {
+       "runs_per_day": {
+        "description": "Simulation runs per UTC calendar day.",
+        "title": "Runs Per Day",
+        "type": "integer"
+       },
+       "max_trials": {
+        "description": "Maximum trials in a single anonymous run.",
+        "title": "Max Trials",
+        "type": "integer"
+       },
+       "max_nodes": {
+        "description": "Maximum nodes in an anonymous graph.",
+        "title": "Max Nodes",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "runs_per_day",
+       "max_trials",
+       "max_nodes"
+      ],
+      "title": "AnonymousLimits",
+      "type": "object"
+     },
+     "BillingInfo": {
+      "description": "Who the caller is and what this call cost them.\n\nPresent on every tool result. Read ``charged_to`` for the verdict and\n``credits_debited`` / ``anonymous_runs_remaining_today`` for the amount.",
+      "properties": {
+       "principal": {
+        "description": "'account' when a credential resolved, else 'anonymous'.",
+        "enum": [
+         "anonymous",
+         "account"
+        ],
+        "title": "Principal",
+        "type": "string"
+       },
+       "account_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The resolved account id, or null when anonymous.",
+        "title": "Account Id"
+       },
+       "account_status": {
+        "anyOf": [
+         {
+          "enum": [
+           "matched",
+           "created"
+          ],
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "'matched' when an existing account was resolved, 'created' when this call auto-created one (OAuth first call). Null when anonymous.",
+        "title": "Account Status"
+       },
+       "auth_source": {
+        "description": "How the caller was identified: 'bearer' (Authorization: Bearer nmn_oat_/nmn_pat_), 'api_key' (the api_key tool argument), or 'anonymous' (no credential).",
+        "enum": [
+         "bearer",
+         "api_key",
+         "anonymous"
+        ],
+        "title": "Auth Source",
+        "type": "string"
+       },
+       "charged_to": {
+        "description": "What this call was billed against: 'anonymous_allowance' (one free daily run), 'credits' (the account ledger), or 'none' (free).",
+        "enum": [
+         "anonymous_allowance",
+         "credits",
+         "none"
+        ],
+        "title": "Charged To",
+        "type": "string"
+       },
+       "credits_debited": {
+        "default": 0,
+        "description": "Credits this call debited (0 for a free call).",
+        "title": "Credits Debited",
+        "type": "integer"
+       },
+       "credit_balance": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The account's credit balance AFTER this call. Null when anonymous.",
+        "title": "Credit Balance"
+       },
+       "anonymous_runs_remaining_today": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Free anonymous runs left in the current UTC day, counting this call. Null when the caller is an account (the allowance does not apply).",
+        "title": "Anonymous Runs Remaining Today"
+       },
+       "anonymous_limits": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/AnonymousLimits"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The anonymous tier's bounds. Null when the caller is an account."
+       },
+       "anonymous_allowance_resets_at": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "ISO-8601 instant the anonymous allowance next refills (the next UTC midnight). Null when the caller is an account.",
+        "title": "Anonymous Allowance Resets At"
+       }
+      },
+      "required": [
+       "principal",
+       "auth_source",
+       "charged_to"
+      ],
+      "title": "BillingInfo",
+      "type": "object"
+     },
+     "DrivingInput": {
+      "description": "A best-effort driving input value for a scenario.",
+      "properties": {
+       "node_id": {
+        "title": "Node Id",
+        "type": "string"
+       },
+       "value": {
+        "description": "The root node's own distribution value at the scenario percentile (best-effort marginal driver; exact for monotone single-input graphs).",
+        "title": "Value",
+        "type": "number"
+       }
+      },
+      "required": [
+       "node_id",
+       "value"
+      ],
+      "title": "DrivingInput",
+      "type": "object"
+     },
+     "ScenarioCase": {
+      "description": "One scenario: the target's outcome at a percentile + its driving inputs.",
+      "properties": {
+       "label": {
+        "description": "'worst' | 'median' | 'best' | 'p<N>'.",
+        "title": "Label",
+        "type": "string"
+       },
+       "percentile": {
+        "title": "Percentile",
+        "type": "number"
+       },
+       "output_value": {
+        "description": "The target node's value at this percentile of its distribution.",
+        "title": "Output Value",
+        "type": "number"
+       },
+       "driving_inputs": {
+        "items": {
+         "$ref": "#/$defs/DrivingInput"
+        },
+        "title": "Driving Inputs",
+        "type": "array"
+       }
+      },
+      "required": [
+       "label",
+       "percentile",
+       "output_value"
+      ],
+      "title": "ScenarioCase",
+      "type": "object"
+     }
+    },
+    "description": "Result of ``scenario_analysis``.\n\n``scenarios`` is ascending by percentile (worst first). ``output_value`` for\np0/p100 is the exact min/max; interior percentiles are histogram-estimated\n(same estimate the public SimulationResult exposes). ``driving_inputs`` are a\nbest-effort per-root marginal reconstruction — the bounded aggregate discards\nraw per-trial arrays so the exact driving tuple is not recoverable.",
+    "properties": {
+     "billing": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/BillingInfo"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Who you are and what this call cost: principal, auth source, credits debited and balance, or the anonymous allowance left today."
+     },
+     "target_node_id": {
+      "title": "Target Node Id",
+      "type": "string"
+     },
+     "time_period": {
+      "title": "Time Period",
+      "type": "integer"
+     },
+     "trials": {
+      "title": "Trials",
+      "type": "integer"
+     },
+     "runs_executed": {
+      "description": "Simulation runs the analysis cost (always 1 — one run reused).",
+      "title": "Runs Executed",
+      "type": "integer"
+     },
+     "credits_debited": {
+      "default": 0,
+      "description": "Credits charged to the account (0 for anonymous).",
+      "title": "Credits Debited",
+      "type": "integer"
+     },
+     "scenarios": {
+      "items": {
+       "$ref": "#/$defs/ScenarioCase"
+      },
+      "title": "Scenarios",
+      "type": "array"
+     }
+    },
+    "required": [
+     "target_node_id",
+     "time_period",
+     "trials",
+     "runs_executed"
+    ],
+    "title": "ScenarioAnalysisResult",
+    "type": "object"
+   },
+   "annotations": {
+    "title": "Summarize best/median/worst scenarios",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "validate_graph",
+   "title": "Validate a simulation graph",
+   "description": "Checks a graph for structural problems (cycles, dangling edges, unknown distributions, missing refs) before you run it, returning a list of issues by rule and severity. Use this when you built or edited a graph by hand and want to catch mistakes before spending a run on it. Example: {\"graph\":{\"root_nodes\":[{\"id\":\"root\",\"distribution_type\":\"normal\",\"distribution_params\":{\"mean\":100,\"std\":15}}],\"calc_nodes\":[{\"id\":\"out\",\"formula\":\"{e1}\"}],\"edges\":[{\"id\":\"e1\",\"source\":\"root\",\"target\":\"out\"}],\"run_params\":{\"trials\":1000,\"time_periods\":12}}} Cost: free -- no credits debited, and no anonymous daily run spent. Anonymous callers may use it at any volume.",
+   "inputSchema": {
+    "$defs": {
+     "AggregationRequest": {
+      "additionalProperties": false,
+      "description": "A post-simulation, series-aware metric over one node's full series.\n\nNPV/IRR/payback/CAGR/cumsum are NOT per-period node values: they consume a\ntarget node's complete ``(time_periods x trials)`` matrix AFTER the run and\nreturn one value per trial, summarised into a distribution.\n\nDiscount convention (0-based series index): period ``t=0`` is the present\n(undiscounted) cash flow; period ``t`` is discounted by ``(1+rate)**t``. The\nfirst period is undiscounted.\n\nWarning — two discount conventions coexist; do not mix them. These\naggregations use the **0-based** series index above (first period\nundiscounted). The per-period formula functions ``DISCOUNT(rate,\n{time_period})`` and ``PV(rate, value, {time_period})`` use the **1-based**\n``{time_period}``, so they discount the first period by ``(1+rate)**1``.\n\n\"Investment at period 0\" pattern: model an up-front outlay as a negative\nperiod-0 cash flow in the target node's series; NPV's t=0-undiscounted\nconvention then treats it as the present-value outlay. Do not additionally\ndiscount that first period with ``PV(...,{time_period})`` inside the target\nnode's formula when also requesting an aggregation ``npv`` — combining the\n1-based per-period discount with the 0-based ``npv`` double-shifts the first\nperiod.\n\nPer-period node vs aggregate metric (``prob``): pointing ``prob`` at a\nmulti-period cash-flow NODE via ``target_node_id`` thresholds only that node's\nFINAL-period per-trial value — i.e. ``P(per-period value > x)``, NOT\n``P(NPV > x)``. To get a true ``P(NPV > 0)``, define an ``npv`` aggregation\nfirst, then add a ``prob`` aggregation whose ``target_aggregation_id`` points\nat that ``npv`` id; ``prob`` then thresholds the NPV per-trial vector directly.\nA ``prob`` request targets EITHER a node (``target_node_id``) OR an earlier\naggregation (``target_aggregation_id``) — exactly one, never both.",
+      "properties": {
+       "id": {
+        "description": "Result key for this metric (unique within the request).",
+        "title": "Id",
+        "type": "string"
+       },
+       "target_node_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The node whose full per-period series the metric consumes. Required for every metric except a ``prob`` that targets a prior aggregation via ``target_aggregation_id``. Exactly one of ``target_node_id`` / ``target_aggregation_id`` may be set on a ``prob`` request.",
+        "title": "Target Node Id"
+       },
+       "target_aggregation_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "For a ``prob`` request only: the id of an aggregation defined EARLIER in this output_request whose per-trial vector (e.g. an ``npv``) is thresholded. Lets ``P(NPV > 0)`` be expressed directly instead of the per-period ``P(value > x)`` you get by targeting a multi-period node. The referenced aggregation must produce a per-trial vector (npv/irr/payback/discounted_payback/cagr/cumsum/terminal_value/mirr).",
+        "title": "Target Aggregation Id"
+       },
+       "function": {
+        "description": "One of: npv, irr, payback, discounted_payback, cagr, cumsum, prob, terminal_value, mirr. discounted_payback requires params.rate; npv requires params.rate OR a per-period params.rates curve; prob requires params.op (one of >, >=, <, <=, ==) and params.value; terminal_value requires params.g and params.rate; mirr requires params.finance_rate and params.reinvest_rate.",
+        "title": "Function",
+        "type": "string"
+       },
+       "params": {
+        "additionalProperties": true,
+        "description": "Function params, e.g. {'rate': 0.1} for npv/discounted_payback, {'op': '>', 'value': 0} for prob, {'g': 0.02, 'rate': 0.1} for terminal_value, {'finance_rate': 0.1, 'reinvest_rate': 0.08} for mirr.",
+        "title": "Params",
+        "type": "object"
+       }
+      },
+      "required": [
+       "id",
+       "function"
+      ],
+      "title": "AggregationRequest",
+      "type": "object"
+     },
+     "CalcNode": {
+      "additionalProperties": false,
+      "description": "A computed node. ``formula`` is OPTIONAL.\n\nA null/empty/whitespace formula is allowed: the node is treated as a\nconstant ``0`` every period/trial (incoming edges are ignored — there is no\nimplicit \"sum of incoming edges\"). ``validate_graph`` surfaces this as a\nWARNING, not an error. To sum incoming edges, write the sum explicitly,\ne.g. ``{e1}+{e2}``; for pass-through use ``{e1}``.",
+      "properties": {
+       "id": {
+        "description": "Unique node id within the graph.",
+        "title": "Id",
+        "type": "string"
+       },
+       "name": {
+        "default": "",
+        "description": "Human-readable label.",
+        "title": "Name",
+        "type": "string"
+       },
+       "formula": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Optional expression over incoming edge ids, e.g. '{e1} * 0.5 + {e2}'. To sum incoming edges write '{e1}+{e2}'; for pass-through use '{e1}'. If omitted/empty the node is treated as a constant 0 (sum-of-incoming is not implied); validate_graph reports this as a warning.",
+        "title": "Formula"
+       }
+      },
+      "required": [
+       "id"
+      ],
+      "title": "CalcNode",
+      "type": "object"
+     },
+     "Edge": {
+      "additionalProperties": false,
+      "description": "A directed connection carrying a value from source to target.",
+      "properties": {
+       "id": {
+        "description": "Unique edge id within the graph.",
+        "title": "Id",
+        "type": "string"
+       },
+       "source": {
+        "description": "id of the source node.",
+        "title": "Source",
+        "type": "string"
+       },
+       "target": {
+        "description": "id of the target node.",
+        "title": "Target",
+        "type": "string"
+       },
+       "delay": {
+        "default": 0,
+        "description": "Periods the value is delayed in transit.",
+        "minimum": 0,
+        "title": "Delay",
+        "type": "integer"
+       },
+       "name": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Optional label.",
+        "title": "Name"
+       }
+      },
+      "required": [
+       "id",
+       "source",
+       "target"
+      ],
+      "title": "Edge",
+      "type": "object"
+     },
+     "OutputRequest": {
+      "additionalProperties": false,
+      "description": "Which nodes/edges/periods to include in the result.\n\nEmpty lists mean 'all': all nodes, all edges, all time periods.\n``aggregations`` requests post-simulation series metrics (NPV/IRR/...).",
+      "properties": {
+       "nodes": {
+        "items": {
+         "type": "string"
+        },
+        "title": "Nodes",
+        "type": "array"
+       },
+       "edges": {
+        "items": {
+         "type": "string"
+        },
+        "title": "Edges",
+        "type": "array"
+       },
+       "time_periods": {
+        "items": {
+         "type": "integer"
+        },
+        "title": "Time Periods",
+        "type": "array"
+       },
+       "aggregations": {
+        "items": {
+         "$ref": "#/$defs/AggregationRequest"
+        },
+        "title": "Aggregations",
+        "type": "array"
+       }
+      },
+      "title": "OutputRequest",
+      "type": "object"
+     },
+     "PublicGraph": {
+      "additionalProperties": false,
+      "description": "A complete, validated simulation request — the agent-facing input.\n\nThis is the canonical public shape. Reference integrity (edges point at real\nnodes, output_request references real ids) is validated here so malformed\ngraphs are rejected before they ever reach the engine.",
+      "properties": {
+       "contract_version": {
+        "const": "1.0",
+        "default": "1.0",
+        "description": "Schema version this graph targets.",
+        "title": "Contract Version",
+        "type": "string"
+       },
+       "root_nodes": {
+        "items": {
+         "$ref": "#/$defs/RootNode"
+        },
+        "title": "Root Nodes",
+        "type": "array"
+       },
+       "calc_nodes": {
+        "items": {
+         "$ref": "#/$defs/CalcNode"
+        },
+        "title": "Calc Nodes",
+        "type": "array"
+       },
+       "edges": {
+        "items": {
+         "$ref": "#/$defs/Edge"
+        },
+        "title": "Edges",
+        "type": "array"
+       },
+       "run_params": {
+        "$ref": "#/$defs/RunParams"
+       }
+      },
+      "required": [
+       "run_params"
+      ],
+      "title": "PublicGraph",
+      "type": "object"
+     },
+     "RootNode": {
+      "additionalProperties": false,
+      "description": "A source node that samples from a probability distribution each period.",
+      "properties": {
+       "id": {
+        "description": "Unique node id within the graph.",
+        "title": "Id",
+        "type": "string"
+       },
+       "name": {
+        "default": "",
+        "description": "Human-readable label.",
+        "title": "Name",
+        "type": "string"
+       },
+       "distribution_type": {
+        "description": "One of the catalog distributions (GET /api/v1/contract).",
+        "title": "Distribution Type",
+        "type": "string"
+       },
+       "distribution_params": {
+        "additionalProperties": true,
+        "description": "Params for the chosen distribution, e.g. {'mean': 100, 'std': 15}.",
+        "title": "Distribution Params",
+        "type": "object"
+       },
+       "interval": {
+        "default": 1,
+        "description": "Sample every N periods (1 = every period).",
+        "minimum": 0,
+        "title": "Interval",
+        "type": "integer"
+       },
+       "delay": {
+        "default": 0,
+        "description": "Periods to wait before the first sample.",
+        "minimum": 0,
+        "title": "Delay",
+        "type": "integer"
+       },
+       "sampling_frequency": {
+        "default": "per_period",
+        "description": "'once' draws a single value reused across periods.",
+        "enum": [
+         "per_period",
+         "once"
+        ],
+        "title": "Sampling Frequency",
+        "type": "string"
+       }
+      },
+      "required": [
+       "id",
+       "distribution_type",
+       "distribution_params"
+      ],
+      "title": "RootNode",
+      "type": "object"
+     },
+     "RunParams": {
+      "additionalProperties": false,
+      "description": "Top-level run configuration.",
+      "properties": {
+       "trials": {
+        "description": "Number of Monte Carlo trials.",
+        "exclusiveMinimum": 0,
+        "title": "Trials",
+        "type": "integer"
+       },
+       "time_periods": {
+        "description": "Number of time periods to simulate.",
+        "exclusiveMinimum": 0,
+        "title": "Time Periods",
+        "type": "integer"
+       },
+       "output_request": {
+        "$ref": "#/$defs/OutputRequest"
+       }
+      },
+      "required": [
+       "trials",
+       "time_periods"
+      ],
+      "title": "RunParams",
+      "type": "object"
+     }
+    },
+    "description": "Arguments for ``validate_graph``.",
+    "properties": {
+     "graph": {
+      "$ref": "#/$defs/PublicGraph",
+      "description": "The graph to validate."
+     },
+     "api_key": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Optional API key (validation is free).",
+      "title": "Api Key"
+     }
+    },
+    "required": [
+     "graph"
+    ],
+    "title": "ValidateGraphInput",
+    "type": "object"
+   },
+   "outputSchema": {
+    "$defs": {
+     "AnonymousLimits": {
+      "description": "The anonymous tier's hard bounds, rendered from ``Settings``.",
+      "properties": {
+       "runs_per_day": {
+        "description": "Simulation runs per UTC calendar day.",
+        "title": "Runs Per Day",
+        "type": "integer"
+       },
+       "max_trials": {
+        "description": "Maximum trials in a single anonymous run.",
+        "title": "Max Trials",
+        "type": "integer"
+       },
+       "max_nodes": {
+        "description": "Maximum nodes in an anonymous graph.",
+        "title": "Max Nodes",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "runs_per_day",
+       "max_trials",
+       "max_nodes"
+      ],
+      "title": "AnonymousLimits",
+      "type": "object"
+     },
+     "BillingInfo": {
+      "description": "Who the caller is and what this call cost them.\n\nPresent on every tool result. Read ``charged_to`` for the verdict and\n``credits_debited`` / ``anonymous_runs_remaining_today`` for the amount.",
+      "properties": {
+       "principal": {
+        "description": "'account' when a credential resolved, else 'anonymous'.",
+        "enum": [
+         "anonymous",
+         "account"
+        ],
+        "title": "Principal",
+        "type": "string"
+       },
+       "account_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The resolved account id, or null when anonymous.",
+        "title": "Account Id"
+       },
+       "account_status": {
+        "anyOf": [
+         {
+          "enum": [
+           "matched",
+           "created"
+          ],
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "'matched' when an existing account was resolved, 'created' when this call auto-created one (OAuth first call). Null when anonymous.",
+        "title": "Account Status"
+       },
+       "auth_source": {
+        "description": "How the caller was identified: 'bearer' (Authorization: Bearer nmn_oat_/nmn_pat_), 'api_key' (the api_key tool argument), or 'anonymous' (no credential).",
+        "enum": [
+         "bearer",
+         "api_key",
+         "anonymous"
+        ],
+        "title": "Auth Source",
+        "type": "string"
+       },
+       "charged_to": {
+        "description": "What this call was billed against: 'anonymous_allowance' (one free daily run), 'credits' (the account ledger), or 'none' (free).",
+        "enum": [
+         "anonymous_allowance",
+         "credits",
+         "none"
+        ],
+        "title": "Charged To",
+        "type": "string"
+       },
+       "credits_debited": {
+        "default": 0,
+        "description": "Credits this call debited (0 for a free call).",
+        "title": "Credits Debited",
+        "type": "integer"
+       },
+       "credit_balance": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The account's credit balance AFTER this call. Null when anonymous.",
+        "title": "Credit Balance"
+       },
+       "anonymous_runs_remaining_today": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Free anonymous runs left in the current UTC day, counting this call. Null when the caller is an account (the allowance does not apply).",
+        "title": "Anonymous Runs Remaining Today"
+       },
+       "anonymous_limits": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/AnonymousLimits"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The anonymous tier's bounds. Null when the caller is an account."
+       },
+       "anonymous_allowance_resets_at": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "ISO-8601 instant the anonymous allowance next refills (the next UTC midnight). Null when the caller is an account.",
+        "title": "Anonymous Allowance Resets At"
+       }
+      },
+      "required": [
+       "principal",
+       "auth_source",
+       "charged_to"
+      ],
+      "title": "BillingInfo",
+      "type": "object"
+     },
+     "ValidationIssue": {
+      "description": "One structured validation finding.",
+      "properties": {
+       "rule": {
+        "title": "Rule",
+        "type": "string"
+       },
+       "severity": {
+        "title": "Severity",
+        "type": "string"
+       },
+       "message": {
+        "title": "Message",
+        "type": "string"
+       },
+       "nodes": {
+        "items": {
+         "type": "string"
+        },
+        "title": "Nodes",
+        "type": "array"
+       },
+       "edges": {
+        "items": {
+         "type": "string"
+        },
+        "title": "Edges",
+        "type": "array"
+       }
+      },
+      "required": [
+       "rule",
+       "severity",
+       "message"
+      ],
+      "title": "ValidationIssue",
+      "type": "object"
+     }
+    },
+    "description": "Structured result of ``validate_graph``.",
+    "properties": {
+     "billing": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/BillingInfo"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Who you are and what this call cost: principal, auth source, credits debited and balance, or the anonymous allowance left today."
+     },
+     "is_valid": {
+      "title": "Is Valid",
+      "type": "boolean"
+     },
+     "issues": {
+      "items": {
+       "$ref": "#/$defs/ValidationIssue"
+      },
+      "title": "Issues",
+      "type": "array"
+     }
+    },
+    "required": [
+     "is_valid"
+    ],
+    "title": "ValidateGraphResult",
+    "type": "object"
+   },
+   "annotations": {
+    "title": "Validate a simulation graph",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "estimate",
+   "title": "Estimate run size and cost",
+   "description": "Pre-flight-sizes a graph without running it: estimated peak memory, engine complexity, which tier (small/large) it would run as, and the credit cost. Use this when you want to know what a run will cost or how heavy it is before committing to it, especially for a large or unfamiliar graph. Example: {\"graph\":{\"root_nodes\":[{\"id\":\"root\",\"distribution_type\":\"normal\",\"distribution_params\":{\"mean\":100,\"std\":15}}],\"calc_nodes\":[{\"id\":\"out\",\"formula\":\"{e1}\"}],\"edges\":[{\"id\":\"e1\",\"source\":\"root\",\"target\":\"out\"}],\"run_params\":{\"trials\":1000,\"time_periods\":12}}} Cost: free -- no credits debited, and no anonymous daily run spent. Anonymous callers may use it at any volume.",
+   "inputSchema": {
+    "$defs": {
+     "AggregationRequest": {
+      "additionalProperties": false,
+      "description": "A post-simulation, series-aware metric over one node's full series.\n\nNPV/IRR/payback/CAGR/cumsum are NOT per-period node values: they consume a\ntarget node's complete ``(time_periods x trials)`` matrix AFTER the run and\nreturn one value per trial, summarised into a distribution.\n\nDiscount convention (0-based series index): period ``t=0`` is the present\n(undiscounted) cash flow; period ``t`` is discounted by ``(1+rate)**t``. The\nfirst period is undiscounted.\n\nWarning — two discount conventions coexist; do not mix them. These\naggregations use the **0-based** series index above (first period\nundiscounted). The per-period formula functions ``DISCOUNT(rate,\n{time_period})`` and ``PV(rate, value, {time_period})`` use the **1-based**\n``{time_period}``, so they discount the first period by ``(1+rate)**1``.\n\n\"Investment at period 0\" pattern: model an up-front outlay as a negative\nperiod-0 cash flow in the target node's series; NPV's t=0-undiscounted\nconvention then treats it as the present-value outlay. Do not additionally\ndiscount that first period with ``PV(...,{time_period})`` inside the target\nnode's formula when also requesting an aggregation ``npv`` — combining the\n1-based per-period discount with the 0-based ``npv`` double-shifts the first\nperiod.\n\nPer-period node vs aggregate metric (``prob``): pointing ``prob`` at a\nmulti-period cash-flow NODE via ``target_node_id`` thresholds only that node's\nFINAL-period per-trial value — i.e. ``P(per-period value > x)``, NOT\n``P(NPV > x)``. To get a true ``P(NPV > 0)``, define an ``npv`` aggregation\nfirst, then add a ``prob`` aggregation whose ``target_aggregation_id`` points\nat that ``npv`` id; ``prob`` then thresholds the NPV per-trial vector directly.\nA ``prob`` request targets EITHER a node (``target_node_id``) OR an earlier\naggregation (``target_aggregation_id``) — exactly one, never both.",
+      "properties": {
+       "id": {
+        "description": "Result key for this metric (unique within the request).",
+        "title": "Id",
+        "type": "string"
+       },
+       "target_node_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The node whose full per-period series the metric consumes. Required for every metric except a ``prob`` that targets a prior aggregation via ``target_aggregation_id``. Exactly one of ``target_node_id`` / ``target_aggregation_id`` may be set on a ``prob`` request.",
+        "title": "Target Node Id"
+       },
+       "target_aggregation_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "For a ``prob`` request only: the id of an aggregation defined EARLIER in this output_request whose per-trial vector (e.g. an ``npv``) is thresholded. Lets ``P(NPV > 0)`` be expressed directly instead of the per-period ``P(value > x)`` you get by targeting a multi-period node. The referenced aggregation must produce a per-trial vector (npv/irr/payback/discounted_payback/cagr/cumsum/terminal_value/mirr).",
+        "title": "Target Aggregation Id"
+       },
+       "function": {
+        "description": "One of: npv, irr, payback, discounted_payback, cagr, cumsum, prob, terminal_value, mirr. discounted_payback requires params.rate; npv requires params.rate OR a per-period params.rates curve; prob requires params.op (one of >, >=, <, <=, ==) and params.value; terminal_value requires params.g and params.rate; mirr requires params.finance_rate and params.reinvest_rate.",
+        "title": "Function",
+        "type": "string"
+       },
+       "params": {
+        "additionalProperties": true,
+        "description": "Function params, e.g. {'rate': 0.1} for npv/discounted_payback, {'op': '>', 'value': 0} for prob, {'g': 0.02, 'rate': 0.1} for terminal_value, {'finance_rate': 0.1, 'reinvest_rate': 0.08} for mirr.",
+        "title": "Params",
+        "type": "object"
+       }
+      },
+      "required": [
+       "id",
+       "function"
+      ],
+      "title": "AggregationRequest",
+      "type": "object"
+     },
+     "CalcNode": {
+      "additionalProperties": false,
+      "description": "A computed node. ``formula`` is OPTIONAL.\n\nA null/empty/whitespace formula is allowed: the node is treated as a\nconstant ``0`` every period/trial (incoming edges are ignored — there is no\nimplicit \"sum of incoming edges\"). ``validate_graph`` surfaces this as a\nWARNING, not an error. To sum incoming edges, write the sum explicitly,\ne.g. ``{e1}+{e2}``; for pass-through use ``{e1}``.",
+      "properties": {
+       "id": {
+        "description": "Unique node id within the graph.",
+        "title": "Id",
+        "type": "string"
+       },
+       "name": {
+        "default": "",
+        "description": "Human-readable label.",
+        "title": "Name",
+        "type": "string"
+       },
+       "formula": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Optional expression over incoming edge ids, e.g. '{e1} * 0.5 + {e2}'. To sum incoming edges write '{e1}+{e2}'; for pass-through use '{e1}'. If omitted/empty the node is treated as a constant 0 (sum-of-incoming is not implied); validate_graph reports this as a warning.",
+        "title": "Formula"
+       }
+      },
+      "required": [
+       "id"
+      ],
+      "title": "CalcNode",
+      "type": "object"
+     },
+     "Edge": {
+      "additionalProperties": false,
+      "description": "A directed connection carrying a value from source to target.",
+      "properties": {
+       "id": {
+        "description": "Unique edge id within the graph.",
+        "title": "Id",
+        "type": "string"
+       },
+       "source": {
+        "description": "id of the source node.",
+        "title": "Source",
+        "type": "string"
+       },
+       "target": {
+        "description": "id of the target node.",
+        "title": "Target",
+        "type": "string"
+       },
+       "delay": {
+        "default": 0,
+        "description": "Periods the value is delayed in transit.",
+        "minimum": 0,
+        "title": "Delay",
+        "type": "integer"
+       },
+       "name": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Optional label.",
+        "title": "Name"
+       }
+      },
+      "required": [
+       "id",
+       "source",
+       "target"
+      ],
+      "title": "Edge",
+      "type": "object"
+     },
+     "OutputRequest": {
+      "additionalProperties": false,
+      "description": "Which nodes/edges/periods to include in the result.\n\nEmpty lists mean 'all': all nodes, all edges, all time periods.\n``aggregations`` requests post-simulation series metrics (NPV/IRR/...).",
+      "properties": {
+       "nodes": {
+        "items": {
+         "type": "string"
+        },
+        "title": "Nodes",
+        "type": "array"
+       },
+       "edges": {
+        "items": {
+         "type": "string"
+        },
+        "title": "Edges",
+        "type": "array"
+       },
+       "time_periods": {
+        "items": {
+         "type": "integer"
+        },
+        "title": "Time Periods",
+        "type": "array"
+       },
+       "aggregations": {
+        "items": {
+         "$ref": "#/$defs/AggregationRequest"
+        },
+        "title": "Aggregations",
+        "type": "array"
+       }
+      },
+      "title": "OutputRequest",
+      "type": "object"
+     },
+     "PublicGraph": {
+      "additionalProperties": false,
+      "description": "A complete, validated simulation request — the agent-facing input.\n\nThis is the canonical public shape. Reference integrity (edges point at real\nnodes, output_request references real ids) is validated here so malformed\ngraphs are rejected before they ever reach the engine.",
+      "properties": {
+       "contract_version": {
+        "const": "1.0",
+        "default": "1.0",
+        "description": "Schema version this graph targets.",
+        "title": "Contract Version",
+        "type": "string"
+       },
+       "root_nodes": {
+        "items": {
+         "$ref": "#/$defs/RootNode"
+        },
+        "title": "Root Nodes",
+        "type": "array"
+       },
+       "calc_nodes": {
+        "items": {
+         "$ref": "#/$defs/CalcNode"
+        },
+        "title": "Calc Nodes",
+        "type": "array"
+       },
+       "edges": {
+        "items": {
+         "$ref": "#/$defs/Edge"
+        },
+        "title": "Edges",
+        "type": "array"
+       },
+       "run_params": {
+        "$ref": "#/$defs/RunParams"
+       }
+      },
+      "required": [
+       "run_params"
+      ],
+      "title": "PublicGraph",
+      "type": "object"
+     },
+     "RootNode": {
+      "additionalProperties": false,
+      "description": "A source node that samples from a probability distribution each period.",
+      "properties": {
+       "id": {
+        "description": "Unique node id within the graph.",
+        "title": "Id",
+        "type": "string"
+       },
+       "name": {
+        "default": "",
+        "description": "Human-readable label.",
+        "title": "Name",
+        "type": "string"
+       },
+       "distribution_type": {
+        "description": "One of the catalog distributions (GET /api/v1/contract).",
+        "title": "Distribution Type",
+        "type": "string"
+       },
+       "distribution_params": {
+        "additionalProperties": true,
+        "description": "Params for the chosen distribution, e.g. {'mean': 100, 'std': 15}.",
+        "title": "Distribution Params",
+        "type": "object"
+       },
+       "interval": {
+        "default": 1,
+        "description": "Sample every N periods (1 = every period).",
+        "minimum": 0,
+        "title": "Interval",
+        "type": "integer"
+       },
+       "delay": {
+        "default": 0,
+        "description": "Periods to wait before the first sample.",
+        "minimum": 0,
+        "title": "Delay",
+        "type": "integer"
+       },
+       "sampling_frequency": {
+        "default": "per_period",
+        "description": "'once' draws a single value reused across periods.",
+        "enum": [
+         "per_period",
+         "once"
+        ],
+        "title": "Sampling Frequency",
+        "type": "string"
+       }
+      },
+      "required": [
+       "id",
+       "distribution_type",
+       "distribution_params"
+      ],
+      "title": "RootNode",
+      "type": "object"
+     },
+     "RunParams": {
+      "additionalProperties": false,
+      "description": "Top-level run configuration.",
+      "properties": {
+       "trials": {
+        "description": "Number of Monte Carlo trials.",
+        "exclusiveMinimum": 0,
+        "title": "Trials",
+        "type": "integer"
+       },
+       "time_periods": {
+        "description": "Number of time periods to simulate.",
+        "exclusiveMinimum": 0,
+        "title": "Time Periods",
+        "type": "integer"
+       },
+       "output_request": {
+        "$ref": "#/$defs/OutputRequest"
+       }
+      },
+      "required": [
+       "trials",
+       "time_periods"
+      ],
+      "title": "RunParams",
+      "type": "object"
+     }
+    },
+    "description": "Arguments for ``estimate`` (runtime/memory pre-flight).",
+    "properties": {
+     "graph": {
+      "$ref": "#/$defs/PublicGraph",
+      "description": "The graph to size."
+     },
+     "api_key": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Optional API key (estimation is free).",
+      "title": "Api Key"
+     }
+    },
+    "required": [
+     "graph"
+    ],
+    "title": "EstimateInput",
+    "type": "object"
+   },
+   "outputSchema": {
+    "$defs": {
+     "AnonymousLimits": {
+      "description": "The anonymous tier's hard bounds, rendered from ``Settings``.",
+      "properties": {
+       "runs_per_day": {
+        "description": "Simulation runs per UTC calendar day.",
+        "title": "Runs Per Day",
+        "type": "integer"
+       },
+       "max_trials": {
+        "description": "Maximum trials in a single anonymous run.",
+        "title": "Max Trials",
+        "type": "integer"
+       },
+       "max_nodes": {
+        "description": "Maximum nodes in an anonymous graph.",
+        "title": "Max Nodes",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "runs_per_day",
+       "max_trials",
+       "max_nodes"
+      ],
+      "title": "AnonymousLimits",
+      "type": "object"
+     },
+     "BillingInfo": {
+      "description": "Who the caller is and what this call cost them.\n\nPresent on every tool result. Read ``charged_to`` for the verdict and\n``credits_debited`` / ``anonymous_runs_remaining_today`` for the amount.",
+      "properties": {
+       "principal": {
+        "description": "'account' when a credential resolved, else 'anonymous'.",
+        "enum": [
+         "anonymous",
+         "account"
+        ],
+        "title": "Principal",
+        "type": "string"
+       },
+       "account_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The resolved account id, or null when anonymous.",
+        "title": "Account Id"
+       },
+       "account_status": {
+        "anyOf": [
+         {
+          "enum": [
+           "matched",
+           "created"
+          ],
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "'matched' when an existing account was resolved, 'created' when this call auto-created one (OAuth first call). Null when anonymous.",
+        "title": "Account Status"
+       },
+       "auth_source": {
+        "description": "How the caller was identified: 'bearer' (Authorization: Bearer nmn_oat_/nmn_pat_), 'api_key' (the api_key tool argument), or 'anonymous' (no credential).",
+        "enum": [
+         "bearer",
+         "api_key",
+         "anonymous"
+        ],
+        "title": "Auth Source",
+        "type": "string"
+       },
+       "charged_to": {
+        "description": "What this call was billed against: 'anonymous_allowance' (one free daily run), 'credits' (the account ledger), or 'none' (free).",
+        "enum": [
+         "anonymous_allowance",
+         "credits",
+         "none"
+        ],
+        "title": "Charged To",
+        "type": "string"
+       },
+       "credits_debited": {
+        "default": 0,
+        "description": "Credits this call debited (0 for a free call).",
+        "title": "Credits Debited",
+        "type": "integer"
+       },
+       "credit_balance": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The account's credit balance AFTER this call. Null when anonymous.",
+        "title": "Credit Balance"
+       },
+       "anonymous_runs_remaining_today": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Free anonymous runs left in the current UTC day, counting this call. Null when the caller is an account (the allowance does not apply).",
+        "title": "Anonymous Runs Remaining Today"
+       },
+       "anonymous_limits": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/AnonymousLimits"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The anonymous tier's bounds. Null when the caller is an account."
+       },
+       "anonymous_allowance_resets_at": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "ISO-8601 instant the anonymous allowance next refills (the next UTC midnight). Null when the caller is an account.",
+        "title": "Anonymous Allowance Resets At"
+       }
+      },
+      "required": [
+       "principal",
+       "auth_source",
+       "charged_to"
+      ],
+      "title": "BillingInfo",
+      "type": "object"
+     }
+    },
+    "description": "Pre-flight runtime/memory estimate.",
+    "properties": {
+     "billing": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/BillingInfo"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Who you are and what this call cost: principal, auth source, credits debited and balance, or the anonymous allowance left today."
+     },
+     "trials": {
+      "title": "Trials",
+      "type": "integer"
+     },
+     "time_periods": {
+      "title": "Time Periods",
+      "type": "integer"
+     },
+     "node_count": {
+      "title": "Node Count",
+      "type": "integer"
+     },
+     "edge_count": {
+      "title": "Edge Count",
+      "type": "integer"
+     },
+     "estimated_memory_mb": {
+      "description": "Estimated peak RSS increase, MB.",
+      "title": "Estimated Memory Mb",
+      "type": "number"
+     },
+     "graph_complexity": {
+      "description": "Engine complexity score.",
+      "title": "Graph Complexity",
+      "type": "integer"
+     },
+     "tier": {
+      "description": "The tier this run would execute as.",
+      "title": "Tier",
+      "type": "string"
+     },
+     "credit_cost": {
+      "description": "Credits an authenticated run would cost.",
+      "title": "Credit Cost",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "trials",
+     "time_periods",
+     "node_count",
+     "edge_count",
+     "estimated_memory_mb",
+     "graph_complexity",
+     "tier",
+     "credit_cost"
+    ],
+    "title": "EstimateResult",
+    "type": "object"
+   },
+   "annotations": {
+    "title": "Estimate run size and cost",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "solve_distribution_parameters",
+   "title": "Convert an estimate into distribution parameters",
+   "description": "Converts a human-style estimate (a min/max range at a stated confidence, or a most-likely value) into the distribution_params a root node needs. Use this when you have a rough verbal estimate like 'between 80 and 120, 90% confident' and need engine-ready parameters rather than guessing them yourself. Example: {\"distribution_type\":\"normal\",\"min_estimate\":80,\"max_estimate\":120,\"percentile_range\":0.9} Cost: free -- no credits debited, and no anonymous daily run spent. Anonymous callers may use it at any volume.",
+   "inputSchema": {
+    "description": "Arguments for ``solve_distribution_parameters``.\n\nFind distribution parameters that fit a min/max range at a given confidence,\nso an agent can turn a human-style 'between X and Y' estimate into engine-ready\n``distribution_params``.",
+    "properties": {
+     "distribution_type": {
+      "description": "A catalog distribution, e.g. 'normal', 'triangle', 'beta'.",
+      "title": "Distribution Type",
+      "type": "string"
+     },
+     "min_estimate": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Low end of the range (required for most types).",
+      "title": "Min Estimate"
+     },
+     "max_estimate": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "High end of the range (required for most types).",
+      "title": "Max Estimate"
+     },
+     "percentile_range": {
+      "default": 0.9,
+      "description": "Confidence the [min,max] interval covers, e.g. 0.9 for 90%.",
+      "exclusiveMaximum": 1,
+      "exclusiveMinimum": 0,
+      "title": "Percentile Range",
+      "type": "number"
+     },
+     "mode_estimate": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Most-likely value; required for constant/bernoulli/binomial.",
+      "title": "Mode Estimate"
+     },
+     "api_key": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Optional API key (solving is free).",
+      "title": "Api Key"
+     }
+    },
+    "required": [
+     "distribution_type"
+    ],
+    "title": "SolveDistributionInput",
+    "type": "object"
+   },
+   "outputSchema": {
+    "$defs": {
+     "AnonymousLimits": {
+      "description": "The anonymous tier's hard bounds, rendered from ``Settings``.",
+      "properties": {
+       "runs_per_day": {
+        "description": "Simulation runs per UTC calendar day.",
+        "title": "Runs Per Day",
+        "type": "integer"
+       },
+       "max_trials": {
+        "description": "Maximum trials in a single anonymous run.",
+        "title": "Max Trials",
+        "type": "integer"
+       },
+       "max_nodes": {
+        "description": "Maximum nodes in an anonymous graph.",
+        "title": "Max Nodes",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "runs_per_day",
+       "max_trials",
+       "max_nodes"
+      ],
+      "title": "AnonymousLimits",
+      "type": "object"
+     },
+     "BillingInfo": {
+      "description": "Who the caller is and what this call cost them.\n\nPresent on every tool result. Read ``charged_to`` for the verdict and\n``credits_debited`` / ``anonymous_runs_remaining_today`` for the amount.",
+      "properties": {
+       "principal": {
+        "description": "'account' when a credential resolved, else 'anonymous'.",
+        "enum": [
+         "anonymous",
+         "account"
+        ],
+        "title": "Principal",
+        "type": "string"
+       },
+       "account_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The resolved account id, or null when anonymous.",
+        "title": "Account Id"
+       },
+       "account_status": {
+        "anyOf": [
+         {
+          "enum": [
+           "matched",
+           "created"
+          ],
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "'matched' when an existing account was resolved, 'created' when this call auto-created one (OAuth first call). Null when anonymous.",
+        "title": "Account Status"
+       },
+       "auth_source": {
+        "description": "How the caller was identified: 'bearer' (Authorization: Bearer nmn_oat_/nmn_pat_), 'api_key' (the api_key tool argument), or 'anonymous' (no credential).",
+        "enum": [
+         "bearer",
+         "api_key",
+         "anonymous"
+        ],
+        "title": "Auth Source",
+        "type": "string"
+       },
+       "charged_to": {
+        "description": "What this call was billed against: 'anonymous_allowance' (one free daily run), 'credits' (the account ledger), or 'none' (free).",
+        "enum": [
+         "anonymous_allowance",
+         "credits",
+         "none"
+        ],
+        "title": "Charged To",
+        "type": "string"
+       },
+       "credits_debited": {
+        "default": 0,
+        "description": "Credits this call debited (0 for a free call).",
+        "title": "Credits Debited",
+        "type": "integer"
+       },
+       "credit_balance": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The account's credit balance AFTER this call. Null when anonymous.",
+        "title": "Credit Balance"
+       },
+       "anonymous_runs_remaining_today": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Free anonymous runs left in the current UTC day, counting this call. Null when the caller is an account (the allowance does not apply).",
+        "title": "Anonymous Runs Remaining Today"
+       },
+       "anonymous_limits": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/AnonymousLimits"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The anonymous tier's bounds. Null when the caller is an account."
+       },
+       "anonymous_allowance_resets_at": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "ISO-8601 instant the anonymous allowance next refills (the next UTC midnight). Null when the caller is an account.",
+        "title": "Anonymous Allowance Resets At"
+       }
+      },
+      "required": [
+       "principal",
+       "auth_source",
+       "charged_to"
+      ],
+      "title": "BillingInfo",
+      "type": "object"
+     }
+    },
+    "description": "Solved parameters, ready to drop into a root node's distribution_params.",
+    "properties": {
+     "billing": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/BillingInfo"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Who you are and what this call cost: principal, auth source, credits debited and balance, or the anonymous allowance left today."
+     },
+     "distribution_type": {
+      "title": "Distribution Type",
+      "type": "string"
+     },
+     "parameters": {
+      "additionalProperties": true,
+      "title": "Parameters",
+      "type": "object"
+     },
+     "input": {
+      "additionalProperties": true,
+      "title": "Input",
+      "type": "object"
+     }
+    },
+    "required": [
+     "distribution_type",
+     "parameters",
+     "input"
+    ],
+    "title": "SolveDistributionResult",
+    "type": "object"
+   },
+   "annotations": {
+    "title": "Convert an estimate into distribution parameters",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "describe_distribution",
+   "title": "Describe a distribution",
+   "description": "Converts distribution_params back into plain numbers: mean, median, std, mode, requested quantiles, a central interval, and (with a threshold) the probability above/below it. Use this when you were handed a root node -- from fermi's next_steps.simulate.root_node or a graph you are editing -- and need to know what log_normal {mu: 9.2, sigma: 0.6} actually means in plain numbers, rather than hand-computing quantiles yourself. Example: {\"distribution_type\":\"log_normal\",\"distribution_params\":{\"mu\":9.2,\"sigma\":0.6},\"percentile_range\":0.9,\"threshold\":15000} Cost: free -- no credits debited, and no anonymous daily run spent. Anonymous callers may use it at any volume.",
+   "inputSchema": {
+    "description": "Arguments for ``describe_distribution``.\n\nField names deliberately match a root node's shape (``distribution_type``\n+ ``distribution_params``), so a fermi ``next_steps.simulate.root_node``\nfixture can be pasted in verbatim.",
+    "properties": {
+     "distribution_type": {
+      "description": "A catalog distribution, e.g. 'normal', 'triangle', 'beta'.",
+      "title": "Distribution Type",
+      "type": "string"
+     },
+     "distribution_params": {
+      "additionalProperties": true,
+      "description": "The distribution's parameters, e.g. {'mean': 100, 'std': 15}.",
+      "title": "Distribution Params",
+      "type": "object"
+     },
+     "percentile_range": {
+      "default": 0.9,
+      "description": "Confidence the reported interval covers, as a CENTRAL interval (lower=(1-r)/2, upper=1-lower) -- e.g. 0.9 gives p5/p95. Matches solve_distribution_parameters's own convention, so the two tools round-trip.",
+      "exclusiveMaximum": 1,
+      "exclusiveMinimum": 0,
+      "title": "Percentile Range",
+      "type": "number"
+     },
+     "quantiles": {
+      "anyOf": [
+       {
+        "items": {
+         "maximum": 1,
+         "minimum": 0,
+         "type": "number"
+        },
+        "minItems": 1,
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Quantiles (0..1) to report. Default: [0.05, 0.1, 0.5, 0.9, 0.95]. Each entry must be in [0, 1] and the list must not contain duplicates (Seer review, [ref]: a quantile outside [0, 1] extrapolates past the support and produces a nonsense key like 'p-50').",
+      "title": "Quantiles"
+     },
+     "threshold": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "An optional value to report P(X<=threshold) / P(X>threshold) for (continuous types) or P(X<threshold) / P(X>threshold), with P(X=threshold) noted separately (discrete types).",
+      "title": "Threshold"
+     },
+     "api_key": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Optional API key (describing is free).",
+      "title": "Api Key"
+     }
+    },
+    "required": [
+     "distribution_type",
+     "distribution_params"
+    ],
+    "title": "DescribeDistributionInput",
+    "type": "object"
+   },
+   "outputSchema": {
+    "$defs": {
+     "AnonymousLimits": {
+      "description": "The anonymous tier's hard bounds, rendered from ``Settings``.",
+      "properties": {
+       "runs_per_day": {
+        "description": "Simulation runs per UTC calendar day.",
+        "title": "Runs Per Day",
+        "type": "integer"
+       },
+       "max_trials": {
+        "description": "Maximum trials in a single anonymous run.",
+        "title": "Max Trials",
+        "type": "integer"
+       },
+       "max_nodes": {
+        "description": "Maximum nodes in an anonymous graph.",
+        "title": "Max Nodes",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "runs_per_day",
+       "max_trials",
+       "max_nodes"
+      ],
+      "title": "AnonymousLimits",
+      "type": "object"
+     },
+     "BillingInfo": {
+      "description": "Who the caller is and what this call cost them.\n\nPresent on every tool result. Read ``charged_to`` for the verdict and\n``credits_debited`` / ``anonymous_runs_remaining_today`` for the amount.",
+      "properties": {
+       "principal": {
+        "description": "'account' when a credential resolved, else 'anonymous'.",
+        "enum": [
+         "anonymous",
+         "account"
+        ],
+        "title": "Principal",
+        "type": "string"
+       },
+       "account_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The resolved account id, or null when anonymous.",
+        "title": "Account Id"
+       },
+       "account_status": {
+        "anyOf": [
+         {
+          "enum": [
+           "matched",
+           "created"
+          ],
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "'matched' when an existing account was resolved, 'created' when this call auto-created one (OAuth first call). Null when anonymous.",
+        "title": "Account Status"
+       },
+       "auth_source": {
+        "description": "How the caller was identified: 'bearer' (Authorization: Bearer nmn_oat_/nmn_pat_), 'api_key' (the api_key tool argument), or 'anonymous' (no credential).",
+        "enum": [
+         "bearer",
+         "api_key",
+         "anonymous"
+        ],
+        "title": "Auth Source",
+        "type": "string"
+       },
+       "charged_to": {
+        "description": "What this call was billed against: 'anonymous_allowance' (one free daily run), 'credits' (the account ledger), or 'none' (free).",
+        "enum": [
+         "anonymous_allowance",
+         "credits",
+         "none"
+        ],
+        "title": "Charged To",
+        "type": "string"
+       },
+       "credits_debited": {
+        "default": 0,
+        "description": "Credits this call debited (0 for a free call).",
+        "title": "Credits Debited",
+        "type": "integer"
+       },
+       "credit_balance": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The account's credit balance AFTER this call. Null when anonymous.",
+        "title": "Credit Balance"
+       },
+       "anonymous_runs_remaining_today": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Free anonymous runs left in the current UTC day, counting this call. Null when the caller is an account (the allowance does not apply).",
+        "title": "Anonymous Runs Remaining Today"
+       },
+       "anonymous_limits": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/AnonymousLimits"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The anonymous tier's bounds. Null when the caller is an account."
+       },
+       "anonymous_allowance_resets_at": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "ISO-8601 instant the anonymous allowance next refills (the next UTC midnight). Null when the caller is an account.",
+        "title": "Anonymous Allowance Resets At"
+       }
+      },
+      "required": [
+       "principal",
+       "auth_source",
+       "charged_to"
+      ],
+      "title": "BillingInfo",
+      "type": "object"
+     },
+     "DescribeDistributionIntervalSummary": {
+      "description": "A central interval, in exactly the shape ``solve_distribution_parameters``\n\naccepts (``min_estimate``/``max_estimate``/``percentile_range``), so the\ntwo tools round-trip ([ref] AC2).",
+      "properties": {
+       "min_estimate": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Min Estimate"
+       },
+       "max_estimate": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Max Estimate"
+       },
+       "percentile_range": {
+        "title": "Percentile Range",
+        "type": "number"
+       }
+      },
+      "required": [
+       "min_estimate",
+       "max_estimate",
+       "percentile_range"
+      ],
+      "title": "DescribeDistributionIntervalSummary",
+      "type": "object"
+     },
+     "DescribeDistributionSupport": {
+      "description": "The distribution's support bounds (``null`` when unbounded).",
+      "properties": {
+       "min": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Min"
+       },
+       "max": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Max"
+       }
+      },
+      "required": [
+       "min",
+       "max"
+      ],
+      "title": "DescribeDistributionSupport",
+      "type": "object"
+     },
+     "DescribeDistributionThresholdSummary": {
+      "description": "Threshold probabilities for ``describe_distribution``.",
+      "properties": {
+       "value": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Value"
+       },
+       "p_below": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "P Below"
+       },
+       "p_above": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "P Above"
+       }
+      },
+      "required": [
+       "value",
+       "p_below",
+       "p_above"
+      ],
+      "title": "DescribeDistributionThresholdSummary",
+      "type": "object"
+     }
+    },
+    "description": "Plain-numbers description of a distribution -- the inverse of\n\n``solve_distribution_parameters``. Where a moment is\nundefined (e.g. a uniform's mode, or every scalar field for a\nvector-valued type like dirichlet), the field is ``null`` and ``notes``\nexplains why. Never silently 0.0 for an unknown type or a missing param --\nthat raises ``invalid_distribution`` instead (AC6).",
+    "properties": {
+     "billing": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/BillingInfo"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Who you are and what this call cost: principal, auth source, credits debited and balance, or the anonymous allowance left today."
+     },
+     "distribution_type": {
+      "title": "Distribution Type",
+      "type": "string"
+     },
+     "distribution_params": {
+      "additionalProperties": true,
+      "title": "Distribution Params",
+      "type": "object"
+     },
+     "mean": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Mean"
+     },
+     "median": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Median"
+     },
+     "std": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Std"
+     },
+     "mode": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Mode"
+     },
+     "quantiles": {
+      "additionalProperties": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "title": "Quantiles",
+      "type": "object"
+     },
+     "interval": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/DescribeDistributionIntervalSummary"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "threshold": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/DescribeDistributionThresholdSummary"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "support": {
+      "$ref": "#/$defs/DescribeDistributionSupport"
+     },
+     "notes": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Notes",
+      "type": "array"
+     }
+    },
+    "required": [
+     "distribution_type",
+     "distribution_params",
+     "mean",
+     "median",
+     "std",
+     "mode",
+     "quantiles",
+     "interval",
+     "threshold",
+     "support"
+    ],
+    "title": "DescribeDistributionResult",
+    "type": "object"
+   },
+   "annotations": {
+    "title": "Describe a distribution",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "get_results",
+   "title": "Read a run's results",
+   "description": "Fetches the status and, once available, the summarised result for a previously-submitted run by its run_id. Results are readable only by the caller who created the run; anonymous results expire 24 hours after their run was created. Use this when you want to re-check or re-fetch a run you already submitted (e.g. via run_simulation) without resubmitting the graph -- run_simulation itself already blocks until done and returns the full result directly, so this is not a poll-until-ready step for it. Example: {\"run_id\":\"run_8f3c2a\"} Cost: free -- no credits debited, and no anonymous daily run spent. Anonymous callers may use it at any volume.",
+   "inputSchema": {
+    "description": "Arguments for ``get_results``.",
+    "properties": {
+     "run_id": {
+      "description": "A run id returned by run_simulation.",
+      "title": "Run Id",
+      "type": "string"
+     },
+     "api_key": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Your API key from POST /api/v1/accounts (optional). Results are readable only by the caller who created the run, so pass the same api_key (or Bearer) used for the original run_simulation / oat_sensitivity / scenario_analysis call -- otherwise this is treated as an anonymous read.",
+      "title": "Api Key"
+     }
+    },
+    "required": [
+     "run_id"
+    ],
+    "title": "GetResultsInput",
+    "type": "object"
+   },
+   "outputSchema": {
+    "$defs": {
+     "AnonymousLimits": {
+      "description": "The anonymous tier's hard bounds, rendered from ``Settings``.",
+      "properties": {
+       "runs_per_day": {
+        "description": "Simulation runs per UTC calendar day.",
+        "title": "Runs Per Day",
+        "type": "integer"
+       },
+       "max_trials": {
+        "description": "Maximum trials in a single anonymous run.",
+        "title": "Max Trials",
+        "type": "integer"
+       },
+       "max_nodes": {
+        "description": "Maximum nodes in an anonymous graph.",
+        "title": "Max Nodes",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "runs_per_day",
+       "max_trials",
+       "max_nodes"
+      ],
+      "title": "AnonymousLimits",
+      "type": "object"
+     },
+     "BillingInfo": {
+      "description": "Who the caller is and what this call cost them.\n\nPresent on every tool result. Read ``charged_to`` for the verdict and\n``credits_debited`` / ``anonymous_runs_remaining_today`` for the amount.",
+      "properties": {
+       "principal": {
+        "description": "'account' when a credential resolved, else 'anonymous'.",
+        "enum": [
+         "anonymous",
+         "account"
+        ],
+        "title": "Principal",
+        "type": "string"
+       },
+       "account_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The resolved account id, or null when anonymous.",
+        "title": "Account Id"
+       },
+       "account_status": {
+        "anyOf": [
+         {
+          "enum": [
+           "matched",
+           "created"
+          ],
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "'matched' when an existing account was resolved, 'created' when this call auto-created one (OAuth first call). Null when anonymous.",
+        "title": "Account Status"
+       },
+       "auth_source": {
+        "description": "How the caller was identified: 'bearer' (Authorization: Bearer nmn_oat_/nmn_pat_), 'api_key' (the api_key tool argument), or 'anonymous' (no credential).",
+        "enum": [
+         "bearer",
+         "api_key",
+         "anonymous"
+        ],
+        "title": "Auth Source",
+        "type": "string"
+       },
+       "charged_to": {
+        "description": "What this call was billed against: 'anonymous_allowance' (one free daily run), 'credits' (the account ledger), or 'none' (free).",
+        "enum": [
+         "anonymous_allowance",
+         "credits",
+         "none"
+        ],
+        "title": "Charged To",
+        "type": "string"
+       },
+       "credits_debited": {
+        "default": 0,
+        "description": "Credits this call debited (0 for a free call).",
+        "title": "Credits Debited",
+        "type": "integer"
+       },
+       "credit_balance": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The account's credit balance AFTER this call. Null when anonymous.",
+        "title": "Credit Balance"
+       },
+       "anonymous_runs_remaining_today": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Free anonymous runs left in the current UTC day, counting this call. Null when the caller is an account (the allowance does not apply).",
+        "title": "Anonymous Runs Remaining Today"
+       },
+       "anonymous_limits": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/AnonymousLimits"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The anonymous tier's bounds. Null when the caller is an account."
+       },
+       "anonymous_allowance_resets_at": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "ISO-8601 instant the anonymous allowance next refills (the next UTC midnight). Null when the caller is an account.",
+        "title": "Anonymous Allowance Resets At"
+       }
+      },
+      "required": [
+       "principal",
+       "auth_source",
+       "charged_to"
+      ],
+      "title": "BillingInfo",
+      "type": "object"
+     }
+    },
+    "description": "Status + (when available) summary for a previously-submitted run.",
+    "properties": {
+     "billing": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/BillingInfo"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Who you are and what this call cost: principal, auth source, credits debited and balance, or the anonymous allowance left today."
+     },
+     "run_id": {
+      "title": "Run Id",
+      "type": "string"
+     },
+     "status": {
+      "title": "Status",
+      "type": "string"
+     },
+     "tier": {
+      "title": "Tier",
+      "type": "string"
+     },
+     "total_trials": {
+      "title": "Total Trials",
+      "type": "integer"
+     },
+     "trials_completed": {
+      "title": "Trials Completed",
+      "type": "integer"
+     },
+     "created_at": {
+      "title": "Created At",
+      "type": "string"
+     },
+     "summary": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Summary"
+     },
+     "error": {
+      "anyOf": [
+       {
+        "additionalProperties": {
+         "type": "string"
+        },
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Error"
+     }
+    },
+    "required": [
+     "run_id",
+     "status",
+     "tier",
+     "total_trials",
+     "trials_completed",
+     "created_at"
+    ],
+    "title": "GetResultsResult",
+    "type": "object"
+   },
+   "annotations": {
+    "title": "Read a run's results",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "feedback",
+   "title": "Send feedback to the Neumann team",
+   "description": "Sends feedback, a feature request, or a bug report straight to the Neumann team, CC'ing your sender_email so you keep a copy. Use this when something about the service is wrong, missing, or confusing and you want a human to see it directly rather than guessing at a workaround. Anonymous submissions are allowed. Example: {\"feedback_type\":\"feature_request\",\"message\":\"Add CSV export for run results.\",\"sender_email\":\"agent@example.com\"} Cost: free -- no credits debited, and no anonymous daily run spent. Anonymous callers may use it at any volume.",
+   "inputSchema": {
+    "description": "Arguments for ``feedback`` ([ref]; mirrors fermi's schema).",
+    "properties": {
+     "feedback_type": {
+      "description": "The kind of feedback: 'feedback' for general comments, 'feature_request' for new capabilities, 'bug' for issues.",
+      "enum": [
+       "feedback",
+       "feature_request",
+       "bug"
+      ],
+      "title": "Feedback Type",
+      "type": "string"
+     },
+     "message": {
+      "description": "Your feedback or request. Be as specific as possible.",
+      "maxLength": 5000,
+      "minLength": 10,
+      "title": "Message",
+      "type": "string"
+     },
+     "sender_email": {
+      "description": "Your email address. A copy of your feedback is CC'd here so you have a record of what you submitted.",
+      "format": "email",
+      "title": "Sender Email",
+      "type": "string"
+     },
+     "sender_name": {
+      "anyOf": [
+       {
+        "maxLength": 200,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Your name (optional).",
+      "title": "Sender Name"
+     },
+     "api_key": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Your API key from POST /api/v1/accounts (optional). If provided, your account id is attached to the message for context.",
+      "title": "Api Key"
+     }
+    },
+    "required": [
+     "feedback_type",
+     "message",
+     "sender_email"
+    ],
+    "title": "FeedbackInput",
+    "type": "object"
+   },
+   "outputSchema": {
+    "$defs": {
+     "AnonymousLimits": {
+      "description": "The anonymous tier's hard bounds, rendered from ``Settings``.",
+      "properties": {
+       "runs_per_day": {
+        "description": "Simulation runs per UTC calendar day.",
+        "title": "Runs Per Day",
+        "type": "integer"
+       },
+       "max_trials": {
+        "description": "Maximum trials in a single anonymous run.",
+        "title": "Max Trials",
+        "type": "integer"
+       },
+       "max_nodes": {
+        "description": "Maximum nodes in an anonymous graph.",
+        "title": "Max Nodes",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "runs_per_day",
+       "max_trials",
+       "max_nodes"
+      ],
+      "title": "AnonymousLimits",
+      "type": "object"
+     },
+     "BillingInfo": {
+      "description": "Who the caller is and what this call cost them.\n\nPresent on every tool result. Read ``charged_to`` for the verdict and\n``credits_debited`` / ``anonymous_runs_remaining_today`` for the amount.",
+      "properties": {
+       "principal": {
+        "description": "'account' when a credential resolved, else 'anonymous'.",
+        "enum": [
+         "anonymous",
+         "account"
+        ],
+        "title": "Principal",
+        "type": "string"
+       },
+       "account_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The resolved account id, or null when anonymous.",
+        "title": "Account Id"
+       },
+       "account_status": {
+        "anyOf": [
+         {
+          "enum": [
+           "matched",
+           "created"
+          ],
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "'matched' when an existing account was resolved, 'created' when this call auto-created one (OAuth first call). Null when anonymous.",
+        "title": "Account Status"
+       },
+       "auth_source": {
+        "description": "How the caller was identified: 'bearer' (Authorization: Bearer nmn_oat_/nmn_pat_), 'api_key' (the api_key tool argument), or 'anonymous' (no credential).",
+        "enum": [
+         "bearer",
+         "api_key",
+         "anonymous"
+        ],
+        "title": "Auth Source",
+        "type": "string"
+       },
+       "charged_to": {
+        "description": "What this call was billed against: 'anonymous_allowance' (one free daily run), 'credits' (the account ledger), or 'none' (free).",
+        "enum": [
+         "anonymous_allowance",
+         "credits",
+         "none"
+        ],
+        "title": "Charged To",
+        "type": "string"
+       },
+       "credits_debited": {
+        "default": 0,
+        "description": "Credits this call debited (0 for a free call).",
+        "title": "Credits Debited",
+        "type": "integer"
+       },
+       "credit_balance": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The account's credit balance AFTER this call. Null when anonymous.",
+        "title": "Credit Balance"
+       },
+       "anonymous_runs_remaining_today": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Free anonymous runs left in the current UTC day, counting this call. Null when the caller is an account (the allowance does not apply).",
+        "title": "Anonymous Runs Remaining Today"
+       },
+       "anonymous_limits": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/AnonymousLimits"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The anonymous tier's bounds. Null when the caller is an account."
+       },
+       "anonymous_allowance_resets_at": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "ISO-8601 instant the anonymous allowance next refills (the next UTC midnight). Null when the caller is an account.",
+        "title": "Anonymous Allowance Resets At"
+       }
+      },
+      "required": [
+       "principal",
+       "auth_source",
+       "charged_to"
+      ],
+      "title": "BillingInfo",
+      "type": "object"
+     }
+    },
+    "description": "Result of ``feedback``.",
+    "properties": {
+     "billing": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/BillingInfo"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Who you are and what this call cost: principal, auth source, credits debited and balance, or the anonymous allowance left today."
+     },
+     "status": {
+      "description": "'sent' on success.",
+      "title": "Status",
+      "type": "string"
+     },
+     "message": {
+      "description": "Confirmation message.",
+      "title": "Message",
+      "type": "string"
+     }
+    },
+    "required": [
+     "status",
+     "message"
+    ],
+    "title": "FeedbackResult",
+    "type": "object"
+   },
+   "annotations": {
+    "title": "Send feedback to the Neumann team",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "buy_credits",
+   "title": "Buy Neumann credits",
+   "description": "Purchases credits using a payment method already saved from a prior Stripe Checkout session. Use this when an authenticated account is running low on credits and needs more to keep submitting runs or analyses, without a human re-entering card details. Example: {\"credits\":100} Cost: charges the payment card already saved on your account; it mints credits rather than spending them. See GET /billing/pricing for the current per-credit price.",
+   "inputSchema": {
+    "description": "Arguments for ``buy_credits`` ([ref]; mirrors fermi's schema).\n\nAuthentication is required (unlike the free tools above): an anonymous\ncaller gets an ``authentication_required`` tool error. No price literal\nhere by design — see GET /billing/pricing for the current per-credit cost.",
+    "properties": {
+     "credits": {
+      "description": "Number of credits to purchase.",
+      "minimum": 1,
+      "title": "Credits",
+      "type": "integer"
+     },
+     "api_key": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Your API key from POST /api/v1/accounts. Required unless you are authenticated via an Authorization: Bearer token.",
+      "title": "Api Key"
+     }
+    },
+    "required": [
+     "credits"
+    ],
+    "title": "BuyCreditsInput",
+    "type": "object"
+   },
+   "outputSchema": {
+    "$defs": {
+     "AnonymousLimits": {
+      "description": "The anonymous tier's hard bounds, rendered from ``Settings``.",
+      "properties": {
+       "runs_per_day": {
+        "description": "Simulation runs per UTC calendar day.",
+        "title": "Runs Per Day",
+        "type": "integer"
+       },
+       "max_trials": {
+        "description": "Maximum trials in a single anonymous run.",
+        "title": "Max Trials",
+        "type": "integer"
+       },
+       "max_nodes": {
+        "description": "Maximum nodes in an anonymous graph.",
+        "title": "Max Nodes",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "runs_per_day",
+       "max_trials",
+       "max_nodes"
+      ],
+      "title": "AnonymousLimits",
+      "type": "object"
+     },
+     "BillingInfo": {
+      "description": "Who the caller is and what this call cost them.\n\nPresent on every tool result. Read ``charged_to`` for the verdict and\n``credits_debited`` / ``anonymous_runs_remaining_today`` for the amount.",
+      "properties": {
+       "principal": {
+        "description": "'account' when a credential resolved, else 'anonymous'.",
+        "enum": [
+         "anonymous",
+         "account"
+        ],
+        "title": "Principal",
+        "type": "string"
+       },
+       "account_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The resolved account id, or null when anonymous.",
+        "title": "Account Id"
+       },
+       "account_status": {
+        "anyOf": [
+         {
+          "enum": [
+           "matched",
+           "created"
+          ],
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "'matched' when an existing account was resolved, 'created' when this call auto-created one (OAuth first call). Null when anonymous.",
+        "title": "Account Status"
+       },
+       "auth_source": {
+        "description": "How the caller was identified: 'bearer' (Authorization: Bearer nmn_oat_/nmn_pat_), 'api_key' (the api_key tool argument), or 'anonymous' (no credential).",
+        "enum": [
+         "bearer",
+         "api_key",
+         "anonymous"
+        ],
+        "title": "Auth Source",
+        "type": "string"
+       },
+       "charged_to": {
+        "description": "What this call was billed against: 'anonymous_allowance' (one free daily run), 'credits' (the account ledger), or 'none' (free).",
+        "enum": [
+         "anonymous_allowance",
+         "credits",
+         "none"
+        ],
+        "title": "Charged To",
+        "type": "string"
+       },
+       "credits_debited": {
+        "default": 0,
+        "description": "Credits this call debited (0 for a free call).",
+        "title": "Credits Debited",
+        "type": "integer"
+       },
+       "credit_balance": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The account's credit balance AFTER this call. Null when anonymous.",
+        "title": "Credit Balance"
+       },
+       "anonymous_runs_remaining_today": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Free anonymous runs left in the current UTC day, counting this call. Null when the caller is an account (the allowance does not apply).",
+        "title": "Anonymous Runs Remaining Today"
+       },
+       "anonymous_limits": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/AnonymousLimits"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The anonymous tier's bounds. Null when the caller is an account."
+       },
+       "anonymous_allowance_resets_at": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "ISO-8601 instant the anonymous allowance next refills (the next UTC midnight). Null when the caller is an account.",
+        "title": "Anonymous Allowance Resets At"
+       }
+      },
+      "required": [
+       "principal",
+       "auth_source",
+       "charged_to"
+      ],
+      "title": "BillingInfo",
+      "type": "object"
+     }
+    },
+    "description": "Result of ``buy_credits``.",
+    "properties": {
+     "billing": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/BillingInfo"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Who you are and what this call cost: principal, auth source, credits debited and balance, or the anonymous allowance left today."
+     },
+     "credits_purchased": {
+      "title": "Credits Purchased",
+      "type": "integer"
+     },
+     "new_balance": {
+      "title": "New Balance",
+      "type": "integer"
+     },
+     "payment_status": {
+      "title": "Payment Status",
+      "type": "string"
+     }
+    },
+    "required": [
+     "credits_purchased",
+     "new_balance",
+     "payment_status"
+    ],
+    "title": "BuyCreditsResult",
+    "type": "object"
+   },
+   "annotations": {
+    "title": "Buy Neumann credits",
+    "readOnlyHint": false,
+    "destructiveHint": true,
+    "openWorldHint": true
+   }
+  },
+  {
+   "name": "share_result",
+   "title": "Share a run result",
+   "description": "Creates (or fetches the existing) public share link for a PERSISTED run from the stored-graph flow, renderable as HTML/JSON/SVG. Use this when you want to hand a result to someone without giving them API access -- only for a run saved via the stored-graph flow: a run_simulation result is ephemeral and has no usable run_id. Requires authentication (api_key argument or an Authorization: Bearer token) to CREATE the link; the resulting share_url itself needs no credential to view. Example: {\"run_id\":\"run_8f3c2a\"} Cost: free -- no credits debited and no anonymous daily run spent -- but it requires an account (anonymous callers get authentication_required).",
+   "inputSchema": {
+    "description": "Arguments for ``share_result``.\n\n``run_id`` must be a PERSISTED run from the stored-graph flow (the one\n``POST /api/v1/graphs/{graph_id}/runs`` creates), not a ``run_simulation``\nresult — those are ephemeral and were never written to durable storage, so\nthere is nothing to share (see the tool description for why).",
+    "properties": {
+     "run_id": {
+      "description": "A persisted (stored-graph) run id.",
+      "title": "Run Id",
+      "type": "string"
+     },
+     "api_key": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Your API key from POST /api/v1/accounts. Required unless you are authenticated via an Authorization: Bearer token.",
+      "title": "Api Key"
+     }
+    },
+    "required": [
+     "run_id"
+    ],
+    "title": "ShareResultInput",
+    "type": "object"
+   },
+   "outputSchema": {
+    "$defs": {
+     "AnonymousLimits": {
+      "description": "The anonymous tier's hard bounds, rendered from ``Settings``.",
+      "properties": {
+       "runs_per_day": {
+        "description": "Simulation runs per UTC calendar day.",
+        "title": "Runs Per Day",
+        "type": "integer"
+       },
+       "max_trials": {
+        "description": "Maximum trials in a single anonymous run.",
+        "title": "Max Trials",
+        "type": "integer"
+       },
+       "max_nodes": {
+        "description": "Maximum nodes in an anonymous graph.",
+        "title": "Max Nodes",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "runs_per_day",
+       "max_trials",
+       "max_nodes"
+      ],
+      "title": "AnonymousLimits",
+      "type": "object"
+     },
+     "BillingInfo": {
+      "description": "Who the caller is and what this call cost them.\n\nPresent on every tool result. Read ``charged_to`` for the verdict and\n``credits_debited`` / ``anonymous_runs_remaining_today`` for the amount.",
+      "properties": {
+       "principal": {
+        "description": "'account' when a credential resolved, else 'anonymous'.",
+        "enum": [
+         "anonymous",
+         "account"
+        ],
+        "title": "Principal",
+        "type": "string"
+       },
+       "account_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The resolved account id, or null when anonymous.",
+        "title": "Account Id"
+       },
+       "account_status": {
+        "anyOf": [
+         {
+          "enum": [
+           "matched",
+           "created"
+          ],
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "'matched' when an existing account was resolved, 'created' when this call auto-created one (OAuth first call). Null when anonymous.",
+        "title": "Account Status"
+       },
+       "auth_source": {
+        "description": "How the caller was identified: 'bearer' (Authorization: Bearer nmn_oat_/nmn_pat_), 'api_key' (the api_key tool argument), or 'anonymous' (no credential).",
+        "enum": [
+         "bearer",
+         "api_key",
+         "anonymous"
+        ],
+        "title": "Auth Source",
+        "type": "string"
+       },
+       "charged_to": {
+        "description": "What this call was billed against: 'anonymous_allowance' (one free daily run), 'credits' (the account ledger), or 'none' (free).",
+        "enum": [
+         "anonymous_allowance",
+         "credits",
+         "none"
+        ],
+        "title": "Charged To",
+        "type": "string"
+       },
+       "credits_debited": {
+        "default": 0,
+        "description": "Credits this call debited (0 for a free call).",
+        "title": "Credits Debited",
+        "type": "integer"
+       },
+       "credit_balance": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The account's credit balance AFTER this call. Null when anonymous.",
+        "title": "Credit Balance"
+       },
+       "anonymous_runs_remaining_today": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Free anonymous runs left in the current UTC day, counting this call. Null when the caller is an account (the allowance does not apply).",
+        "title": "Anonymous Runs Remaining Today"
+       },
+       "anonymous_limits": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/AnonymousLimits"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The anonymous tier's bounds. Null when the caller is an account."
+       },
+       "anonymous_allowance_resets_at": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "ISO-8601 instant the anonymous allowance next refills (the next UTC midnight). Null when the caller is an account.",
+        "title": "Anonymous Allowance Resets At"
+       }
+      },
+      "required": [
+       "principal",
+       "auth_source",
+       "charged_to"
+      ],
+      "title": "BillingInfo",
+      "type": "object"
+     }
+    },
+    "description": "Result of ``share_result``.",
+    "properties": {
+     "billing": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/BillingInfo"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Who you are and what this call cost: principal, auth source, credits debited and balance, or the anonymous allowance left today."
+     },
+     "share_url": {
+      "description": "Public URL (no credential needed) rendering the result page.",
+      "title": "Share Url",
+      "type": "string"
+     }
+    },
+    "required": [
+     "share_url"
+    ],
+    "title": "ShareResultResult",
+    "type": "object"
+   },
+   "annotations": {
+    "title": "Share a run result",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "whoami",
+   "title": "Check account and quota",
+   "description": "Reports who you are to Neumann and what you may still do: anonymous or an account, the account id and credit balance, or the free anonymous runs left in the current UTC day and when the allowance refills -- plus the per-credit price and your last ten ledger entries. Use this when you need to know, before or after a run, whether a call will be billed to credits or to the free anonymous allowance, how much of either is left, or whether an account was matched at all. Example: {} Cost: free -- no credits debited, and no anonymous daily run spent. Anonymous callers may use it at any volume.",
+   "inputSchema": {
+    "description": "Arguments for ``whoami``.\n\nEvery field is optional: the whole point of the tool is that an agent with\nno credential at all can ask \"who am I and what have I got left\", and get\na real answer rather than a 401.",
+    "properties": {
+     "api_key": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Your API key from POST /api/v1/accounts (optional). Omit to ask about the anonymous caller you currently are.",
+      "title": "Api Key"
+     }
+    },
+    "title": "WhoamiInput",
+    "type": "object"
+   },
+   "outputSchema": {
+    "$defs": {
+     "AnonymousLimits": {
+      "description": "The anonymous tier's hard bounds, rendered from ``Settings``.",
+      "properties": {
+       "runs_per_day": {
+        "description": "Simulation runs per UTC calendar day.",
+        "title": "Runs Per Day",
+        "type": "integer"
+       },
+       "max_trials": {
+        "description": "Maximum trials in a single anonymous run.",
+        "title": "Max Trials",
+        "type": "integer"
+       },
+       "max_nodes": {
+        "description": "Maximum nodes in an anonymous graph.",
+        "title": "Max Nodes",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "runs_per_day",
+       "max_trials",
+       "max_nodes"
+      ],
+      "title": "AnonymousLimits",
+      "type": "object"
+     },
+     "BillingInfo": {
+      "description": "Who the caller is and what this call cost them.\n\nPresent on every tool result. Read ``charged_to`` for the verdict and\n``credits_debited`` / ``anonymous_runs_remaining_today`` for the amount.",
+      "properties": {
+       "principal": {
+        "description": "'account' when a credential resolved, else 'anonymous'.",
+        "enum": [
+         "anonymous",
+         "account"
+        ],
+        "title": "Principal",
+        "type": "string"
+       },
+       "account_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The resolved account id, or null when anonymous.",
+        "title": "Account Id"
+       },
+       "account_status": {
+        "anyOf": [
+         {
+          "enum": [
+           "matched",
+           "created"
+          ],
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "'matched' when an existing account was resolved, 'created' when this call auto-created one (OAuth first call). Null when anonymous.",
+        "title": "Account Status"
+       },
+       "auth_source": {
+        "description": "How the caller was identified: 'bearer' (Authorization: Bearer nmn_oat_/nmn_pat_), 'api_key' (the api_key tool argument), or 'anonymous' (no credential).",
+        "enum": [
+         "bearer",
+         "api_key",
+         "anonymous"
+        ],
+        "title": "Auth Source",
+        "type": "string"
+       },
+       "charged_to": {
+        "description": "What this call was billed against: 'anonymous_allowance' (one free daily run), 'credits' (the account ledger), or 'none' (free).",
+        "enum": [
+         "anonymous_allowance",
+         "credits",
+         "none"
+        ],
+        "title": "Charged To",
+        "type": "string"
+       },
+       "credits_debited": {
+        "default": 0,
+        "description": "Credits this call debited (0 for a free call).",
+        "title": "Credits Debited",
+        "type": "integer"
+       },
+       "credit_balance": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The account's credit balance AFTER this call. Null when anonymous.",
+        "title": "Credit Balance"
+       },
+       "anonymous_runs_remaining_today": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Free anonymous runs left in the current UTC day, counting this call. Null when the caller is an account (the allowance does not apply).",
+        "title": "Anonymous Runs Remaining Today"
+       },
+       "anonymous_limits": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/AnonymousLimits"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The anonymous tier's bounds. Null when the caller is an account."
+       },
+       "anonymous_allowance_resets_at": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "ISO-8601 instant the anonymous allowance next refills (the next UTC midnight). Null when the caller is an account.",
+        "title": "Anonymous Allowance Resets At"
+       }
+      },
+      "required": [
+       "principal",
+       "auth_source",
+       "charged_to"
+      ],
+      "title": "BillingInfo",
+      "type": "object"
+     },
+     "LedgerEntry": {
+      "description": "One credit-ledger movement, mirroring GET /api/v1/accounts/me/ledger.",
+      "properties": {
+       "entry_type": {
+        "description": "e.g. 'signup_grant', 'run_debit'.",
+        "title": "Entry Type",
+        "type": "string"
+       },
+       "amount": {
+        "description": "Signed credit movement.",
+        "title": "Amount",
+        "type": "integer"
+       },
+       "request_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "The idempotency key the movement was keyed on.",
+        "title": "Request Id"
+       },
+       "created_at": {
+        "description": "ISO-8601 instant of the movement.",
+        "title": "Created At",
+        "type": "string"
+       }
+      },
+      "required": [
+       "entry_type",
+       "amount",
+       "created_at"
+      ],
+      "title": "LedgerEntry",
+      "type": "object"
+     }
+    },
+    "description": "Result of ``whoami``: the billing block, the price, and recent movements.\n\nThe identity/quota answer itself is the inherited ``billing`` block -- this\ntool exists to make that block reachable WITHOUT running anything, so it\ndeliberately adds no second copy of those fields.",
+    "properties": {
+     "billing": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/BillingInfo"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Who you are and what this call cost: principal, auth source, credits debited and balance, or the anonymous allowance left today."
+     },
+     "price_per_credit_usd": {
+      "description": "Current per-credit price in USD (the same number GET /billing/pricing reports in cents).",
+      "title": "Price Per Credit Usd",
+      "type": "number"
+     },
+     "recent_ledger": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/$defs/LedgerEntry"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Your last 10 credit-ledger entries, newest first. Null when anonymous (there is no ledger without an account).",
+      "title": "Recent Ledger"
+     }
+    },
+    "required": [
+     "price_per_credit_usd"
+    ],
+    "title": "WhoamiResult",
+    "type": "object"
+   },
+   "annotations": {
+    "title": "Check account and quota",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  }
+ ]
+}

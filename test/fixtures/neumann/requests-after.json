@@ -1,0 +1,66 @@
+[
+  {
+    "id": "r01",
+    "request": "What range of profit outcomes could this plan produce, and how likely is each?",
+    "expected": "run_monte_carlo_simulation"
+  },
+  {
+    "id": "r02",
+    "request": "Which of my uncertain inputs moves the outcome the most?",
+    "expected": "rank_inputs_by_impact"
+  },
+  {
+    "id": "r03",
+    "request": "Give me a worst case, a median case and a best case for revenue.",
+    "expected": "summarize_outcome_scenarios"
+  },
+  {
+    "id": "r04",
+    "request": "Check my model for loops or broken links before I run it.",
+    "expected": "check_simulation_model",
+    "nearMiss": "estimate_simulation_size_and_cost"
+  },
+  {
+    "id": "r05",
+    "request": "How many credits will this simulation cost before I commit to it?",
+    "expected": "estimate_simulation_size_and_cost",
+    "nearMiss": "check_simulation_model"
+  },
+  {
+    "id": "r06",
+    "request": "I think it is between 80 and 120, 90% sure. What normal parameters is that?",
+    "expected": "convert_range_to_distribution",
+    "nearMiss": "convert_distribution_to_range"
+  },
+  {
+    "id": "r07",
+    "request": "What does log_normal mu 9.2 sigma 0.6 mean in plain numbers?",
+    "expected": "convert_distribution_to_range",
+    "nearMiss": "convert_range_to_distribution"
+  },
+  {
+    "id": "r08",
+    "request": "Fetch the results of the run I did earlier; the run_id is abc123.",
+    "expected": "get_simulation_results"
+  },
+  {
+    "id": "r09",
+    "request": "How many free runs do I have left today?",
+    "expected": "check_account_and_credits"
+  },
+  {
+    "id": "r10",
+    "request": "Buy 100 more credits with my saved card.",
+    "expected": "buy_credits"
+  },
+  {
+    "id": "r11",
+    "request": "Tell the team that the export is broken.",
+    "expected": "send_feedback"
+  },
+  {
+    "id": "r12",
+    "request": "What is the weather in Lisbon tomorrow?",
+    "expected": "none"
+  }
+]

@@ -1,0 +1,66 @@
+[
+  {
+    "id": "r01",
+    "request": "What range of profit outcomes could this plan produce, and how likely is each?",
+    "expected": "run_simulation"
+  },
+  {
+    "id": "r02",
+    "request": "Which of my uncertain inputs moves the outcome the most?",
+    "expected": "oat_sensitivity"
+  },
+  {
+    "id": "r03",
+    "request": "Give me a worst case, a median case and a best case for revenue.",
+    "expected": "scenario_analysis"
+  },
+  {
+    "id": "r04",
+    "request": "Check my model for loops or broken links before I run it.",
+    "expected": "validate_graph",
+    "nearMiss": "estimate"
+  },
+  {
+    "id": "r05",
+    "request": "How many credits will this simulation cost before I commit to it?",
+    "expected": "estimate",
+    "nearMiss": "validate_graph"
+  },
+  {
+    "id": "r06",
+    "request": "I think it is between 80 and 120, 90% sure. What normal parameters is that?",
+    "expected": "solve_distribution_parameters",
+    "nearMiss": "describe_distribution"
+  },
+  {
+    "id": "r07",
+    "request": "What does log_normal mu 9.2 sigma 0.6 mean in plain numbers?",
+    "expected": "describe_distribution",
+    "nearMiss": "solve_distribution_parameters"
+  },
+  {
+    "id": "r08",
+    "request": "Fetch the results of the run I did earlier; the run_id is abc123.",
+    "expected": "get_results"
+  },
+  {
+    "id": "r09",
+    "request": "How many free runs do I have left today?",
+    "expected": "whoami"
+  },
+  {
+    "id": "r10",
+    "request": "Buy 100 more credits with my saved card.",
+    "expected": "buy_credits"
+  },
+  {
+    "id": "r11",
+    "request": "Tell the team that the export is broken.",
+    "expected": "feedback"
+  },
+  {
+    "id": "r12",
+    "request": "What is the weather in Lisbon tomorrow?",
+    "expected": "none"
+  }
+]
