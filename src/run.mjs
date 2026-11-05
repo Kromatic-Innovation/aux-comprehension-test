@@ -63,15 +63,30 @@ export async function run(opts, deps = {}) {
   if (!(typeof opts.maxUsd === "number" && Number.isFinite(opts.maxUsd) && opts.maxUsd > 0)) {
     throw new RunError("USAGE", "--max-usd is required and must be a positive number; there is no default");
   }
-  const payload = normalizePayload(opts.tools);
-  const truth = parseTruth(opts.truth);
-  checkTruthCoverage(truth, payload);
-  const requests = normalizeRequests(opts.requests, payload);
+  // inputs.mjs and buildPanel throw plain Errors -- they have no opinion about
+  // exit codes. Every one of those is the CALLER's input being wrong, so they
+  // surface as USAGE (exit 64), never as a bug in this tool (exit 70). Applied
+  // per call rather than around the whole block on purpose:
+  // registerReaderPersonas() reads this package's own bundled personas, so if
+  // it fails the package is broken and that IS an internal error.
+  const asUsage = (fn) => {
+    try {
+      return fn();
+    } catch (err) {
+      if (err instanceof RunError) throw err;
+      throw new RunError("USAGE", err.message);
+    }
+  };
+
+  const payload = asUsage(() => normalizePayload(opts.tools));
+  const truth = asUsage(() => parseTruth(opts.truth));
+  asUsage(() => checkTruthCoverage(truth, payload));
+  const requests = asUsage(() => normalizeRequests(opts.requests, payload));
 
   registerReaderPersonas();
   const personaIds = opts.personas?.length ? opts.personas : DEFAULT_PERSONA_IDS;
   for (const id of personaIds) if (!getPersona(id)) throw new RunError("USAGE", `unknown persona ${id}; known: ${DEFAULT_PERSONA_IDS.join(", ")}`);
-  const panel = buildPanel({ personaIds, models: opts.models, maxReaders: opts.maxReaders });
+  const panel = asUsage(() => buildPanel({ personaIds, models: opts.models, maxReaders: opts.maxReaders }));
 
   const active = [];
   const skipped = [];
@@ -80,29 +95,39 @@ export async function run(opts, deps = {}) {
     if (c.client) active.push({ reader, client: c.client });
     else skipped.push({ personaId: reader.personaId, model: reader.model, provider: reader.provider, reason: c.skipped });
   }
+  let judgeSpec = null;
   let judge = { model: null, client: null, skipped: null };
   if (opts.judge) {
-    const spec = parseModelSpec(opts.judge);
-    const c = clientFor(spec, env);
-    judge = c.client ? { model: spec.model, client: c.client, skipped: null } : { model: null, client: null, skipped: `${spec.model}: ${c.skipped}` };
+    judgeSpec = parseModelSpec(opts.judge);
+    const c = clientFor(judgeSpec, env);
+    judge = c.client ? { model: judgeSpec.model, client: c.client, skipped: null } : { model: null, client: null, skipped: `${judgeSpec.model}: ${c.skipped}` };
   }
-  if (active.length === 0) {
+
+  // A real run needs at least one reader that can actually be called.
+  // --estimate-only does not: it answers a planning question ("what would
+  // this cost?") that is meaningful BEFORE any key exists, so it prices the
+  // whole panel the command line names and reports which readers cannot run
+  // yet. That can only over-state the bound, never under-state it: the panel
+  // is a superset of the readers a keyed run would call.
+  if (active.length === 0 && !opts.estimateOnly) {
     throw new RunError("REFUSED", `no reader can run: ${skipped.map((s) => `${s.model} (${s.reason})`).join("; ")}`);
   }
 
   // Pre-run estimate: the exact reader prompts, full output caps.
-  const calls = active.map(({ reader }) => ({
+  const priced = opts.estimateOnly ? panel.map((reader) => ({ reader })) : active;
+  const pricedJudge = opts.estimateOnly ? (judgeSpec?.model ?? null) : judge.model;
+  const calls = priced.map(({ reader }) => ({
     purpose: `reader ${reader.personaId}`,
     model: reader.model,
     prompt: renderReaderPrompt({ personaId: reader.personaId, payload, requests }),
     maxTokens,
   }));
-  if (judge.client) {
+  if (pricedJudge) {
     const fakeTeachBack = Object.keys(truth.tools).map((tool) => ({ tool, meaning: "x".repeat(Math.ceil((maxTokens * 4) / Object.keys(truth.tools).length)) }));
-    for (const { reader } of active) {
-      calls.push({ purpose: `judge teach-back ${reader.personaId}`, model: judge.model, prompt: buildTeachBackPrompt(truth, fakeTeachBack), maxTokens: judgeMaxTokens });
+    for (const { reader } of priced) {
+      calls.push({ purpose: `judge teach-back ${reader.personaId}`, model: pricedJudge, prompt: buildTeachBackPrompt(truth, fakeTeachBack), maxTokens: judgeMaxTokens });
     }
-    calls.push({ purpose: "judge re-read", model: judge.model, prompt: buildRereadPrompt(payload, []) + "x".repeat(8000), maxTokens: judgeMaxTokens });
+    calls.push({ purpose: "judge re-read", model: pricedJudge, prompt: buildRereadPrompt(payload, []) + "x".repeat(8000), maxTokens: judgeMaxTokens });
   }
   let est;
   try {
@@ -118,7 +143,16 @@ export async function run(opts, deps = {}) {
     );
   }
   if (opts.estimateOnly) {
-    return { status: "estimate", estimate: est, skipped, judge: { model: judge.model, skipped: judge.skipped } };
+    return {
+      status: "estimate",
+      estimate: est,
+      skipped,
+      judge: { model: judgeSpec?.model ?? null, skipped: judge.skipped },
+      // What the estimate covers, and what could run right now with the keys
+      // currently in the environment. `priced` >= `runnable` always.
+      priced: { readers: priced.length, judge: pricedJudge },
+      runnable: { readers: active.length, judge: Boolean(judge.client) },
+    };
   }
 
   // Readers.

@@ -6,9 +6,11 @@ name: Eval - Live panel
 # required check -- workflow_dispatch only. See eval/README.md.
 #
 # Credentials follow the same 1Password load-secrets pattern as the panelist
-# repository's manual evals: the only repository secret is
-# OP_SERVICE_ACCOUNT_TOKEN. A key that does not resolve leaves its provider
-# skipped and reported, not failed.
+# repository's manual evals, with OP_SERVICE_ACCOUNT_TOKEN as the only
+# repository secret needed. A repo without that token can instead set plain
+# ANTHROPIC_API_KEY / OPENAI_API_KEY repository secrets; the 1Password step is
+# skipped and the run step falls back to them. Either way, a key that does not
+# resolve leaves its provider skipped and reported, not failed.
 
 on:
   workflow_dispatch:
@@ -49,7 +51,27 @@ jobs:
           node-version: 20
       - run: npm ci --no-audit --no-fund
 
+      # Two credential routes. 1Password is the primary one; a fork or a repo
+      # that has not been given OP_SERVICE_ACCOUNT_TOKEN can instead set plain
+      # ANTHROPIC_API_KEY / OPENAI_API_KEY repository secrets. The `secrets`
+      # context is NOT available in a step-level `if:`, so presence has to be
+      # resolved into a step output first -- `steps` context is available.
+      - name: Resolve credential route
+        id: creds
+        env:
+          OP_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+        run: |
+          set -u
+          if [ -n "${OP_TOKEN:-}" ]; then
+            echo "op=true" >> "$GITHUB_OUTPUT"
+            echo "Credential route: 1Password (OP_SERVICE_ACCOUNT_TOKEN is set)."
+          else
+            echo "op=false" >> "$GITHUB_OUTPUT"
+            echo "Credential route: plain repository secrets (no OP_SERVICE_ACCOUNT_TOKEN)."
+          fi
+
       - name: Load provider API keys from 1Password
+        if: steps.creds.outputs.op == 'true'
         uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
         with:
           export-env: true
@@ -65,8 +87,21 @@ jobs:
           MAX_USD: ${{ inputs.max_usd }}
           JUDGE: ${{ inputs.judge }}
           PRICES: ${{ inputs.prices }}
+          # Deliberately DISTINCT names. A step-level env entry called
+          # ANTHROPIC_API_KEY would shadow the value the 1Password step wrote
+          # to GITHUB_ENV (explicit step/job env wins over GITHUB_ENV), so the
+          # two routes must not share a variable name. The shell below prefers
+          # whatever is already exported and falls back to these.
+          ANTHROPIC_API_KEY_FALLBACK: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY_FALLBACK: ${{ secrets.OPENAI_API_KEY }}
         run: |
           set -u
+          # 1Password route (if it ran) already exported these; otherwise take
+          # the plain repository secret. A provider still missing a key is
+          # skipped and reported by the CLI, not a failure.
+          : "${ANTHROPIC_API_KEY:=${ANTHROPIC_API_KEY_FALLBACK:-}}"
+          : "${OPENAI_API_KEY:=${OPENAI_API_KEY_FALLBACK:-}}"
+          export ANTHROPIC_API_KEY OPENAI_API_KEY
           case "$FIXTURE" in
             mini) dir=test/fixtures/mini; tools=tools.json; truth=truth.md; reqs=requests.json ;;
             neumann-before) dir=test/fixtures/neumann; tools=tools-before.json; truth=truth-before.md; reqs=requests-before.json ;;

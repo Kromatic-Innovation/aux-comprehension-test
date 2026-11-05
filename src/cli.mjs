@@ -1,14 +1,21 @@
 // cli.mjs — `aux-comprehension-test run ...`.
 //
 // Exit codes: 0 pass, 1 conditional, 2 fail, 3 refused (over budget, unknown
-// price, or no reader can run; nothing was called), 64 usage error.
+// price, or no reader can run; nothing was called), 64 usage error,
+// 70 internal error.
+//
+// 64 and 70 are the sysexits EX_USAGE / EX_SOFTWARE split: 64 means "your
+// command line or your input files are wrong", 70 means "this tool hit a bug".
+// Collapsing a bug into 64 told the user to go fix a correct command line.
+// Neither reuses 0-2, which are verdicts -- a caller cannot distinguish a
+// crash from a result if a crash exits 1.
 
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { run, RunError, VERSION } from "./run.mjs";
 import { loadPrices } from "./cost.mjs";
 
-export const EXIT = { pass: 0, conditional: 1, fail: 2, refused: 3, usage: 64 };
+export const EXIT = { pass: 0, conditional: 1, fail: 2, refused: 3, usage: 64, internal: 70 };
 
 export const USAGE = `aux-comprehension-test ${VERSION}
 
@@ -31,12 +38,15 @@ Options:
   --max-tokens <N>      reader output cap (default 8192)
   --prices <file>       price overrides {"models": {"<id>": {"input": usd/Mtok, "output": usd/Mtok}}}
   --length-benchmark <file>  {materiallyLonger, correlatesWithLowerSelection, source}; only both true promotes length complaints
-  --estimate-only       print the pre-run estimate and exit without calling any model
+  --estimate-only       print the pre-run estimate and exit without calling any model.
+                        Needs no provider key: it prices the whole panel and reports
+                        which readers cannot run yet
+  --version, -V         print the version and exit
 
 Keys come from ANTHROPIC_API_KEY, OPENAI_API_KEY, XAI_API_KEY, GEMINI_API_KEY. A missing key skips that
 reader and is reported; it is not a failure.
 
-Exit: 0 pass, 1 conditional, 2 fail, 3 refused, 64 usage error.
+Exit: 0 pass, 1 conditional, 2 fail, 3 refused, 64 usage error, 70 internal error.
 `;
 
 const OPTIONS = {
@@ -53,6 +63,7 @@ const OPTIONS = {
   "length-benchmark": { type: "string" },
   out: { type: "string" },
   "estimate-only": { type: "boolean" },
+  version: { type: "boolean", short: "V" },
   help: { type: "boolean", short: "h" },
 };
 
@@ -70,6 +81,10 @@ export async function main(argv, { env = process.env, stdout = process.stdout, s
     return EXIT.usage;
   }
   const { values: v, positionals } = parsed;
+  if (v.version || positionals[0] === "version") {
+    stdout.write(`${VERSION}\n`);
+    return 0;
+  }
   if (v.help || positionals[0] === "help") {
     stdout.write(USAGE);
     return 0;
@@ -121,14 +136,25 @@ export async function main(argv, { env = process.env, stdout = process.stdout, s
       stderr.write(`REFUSED: ${err.message}\n`);
       return EXIT.refused;
     }
-    stderr.write(`${err.message}\n`);
-    return EXIT.usage;
+    if (err instanceof RunError && err.code === "USAGE") {
+      stderr.write(`${err.message}\n`);
+      return EXIT.usage;
+    }
+    // Anything else is this tool's own bug, not the caller's mistake.
+    stderr.write(`internal error: ${err?.stack ?? err?.message ?? String(err)}\n`);
+    return EXIT.internal;
   }
 
   for (const s of result.skipped) stderr.write(`SKIPPED reader ${s.personaId} x ${s.model}: ${s.reason}\n`);
   if (result.judge?.skipped) stderr.write(`SKIPPED judge ${result.judge.skipped}\n`);
   if (result.status === "estimate") {
-    stdout.write(`estimated spend (upper bound): $${result.estimate.usd.toFixed(4)} over ${result.estimate.calls.length} call(s)\n`);
+    const readyJudge = result.priced.judge ? (result.runnable.judge ? "" : " (no key yet)") : "";
+    stdout.write(
+      `estimated spend (upper bound): $${result.estimate.usd.toFixed(4)} over ${result.estimate.calls.length} call(s)\n` +
+        `priced: ${result.priced.readers} reader(s)${result.priced.judge ? ` + judge ${result.priced.judge}${readyJudge}` : ""}, ceiling $${maxUsd}\n` +
+        `runnable now: ${result.runnable.readers} of ${result.priced.readers} reader(s) have a key\n` +
+        `no model was called; nothing was spent.\n`,
+    );
     return 0;
   }
   const g = result.grade;

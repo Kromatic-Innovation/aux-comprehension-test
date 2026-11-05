@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { main, EXIT } from "../src/cli.mjs";
 import { FIXTURES, mockClientFor, resetRegistry, TEST_PRICES } from "./_mock.mjs";
 import { miniReader } from "./_mini.mjs";
@@ -108,4 +109,190 @@ test("without --judge the summary says pass is withheld and why", async () => {
   assert.equal(code, EXIT.conditional);
   assert.match(stdout.text, /pass withheld: .*no --judge/);
   assert.match(readFileSync(join(out, "verdict.md"), "utf8"), /## Why not pass[\s\S]*no --judge/);
+});
+
+// --- The README's first run: no provider key, no spend. ---------------------
+//
+// This exercises the REAL clientFor (no injected deps) and the REAL bundled
+// price table, with an empty environment -- exactly what a reader who has just
+// installed the package and set no key gets. If this test needs a mock to
+// pass, the README is lying.
+
+/**
+ * The argv of the FIRST fenced bash command under README.md's "## First run"
+ * heading, with repo-relative input paths resolved. The test below runs the
+ * README's own command text, so the documented first run and the tested first
+ * run cannot drift apart.
+ */
+function readmeFirstRunArgv() {
+  const root = new URL("../", import.meta.url);
+  const readme = readFileSync(new URL("README.md", root), "utf8");
+  const start = readme.indexOf("## First run");
+  assert.ok(start > 0, "README.md has no '## First run' heading");
+  const fence = readme.indexOf("```bash", start);
+  assert.ok(fence > 0, "no fenced bash block under README.md's '## First run'");
+  const body = readme.slice(fence + "```bash".length, readme.indexOf("```", fence + 7));
+  const tokens = body.replace(/\\\n/g, " ").trim().split(/\s+/);
+  assert.equal(tokens[0], "aux-comprehension-test", `first-run block does not invoke the CLI: ${tokens[0]}`);
+  return tokens.slice(1).map((t) => (t.startsWith("test/fixtures/") ? fileURLToPath(new URL(t, root)) : t));
+}
+
+test("the README's first run works with no provider key and spends nothing", async () => {
+  const argv = readmeFirstRunArgv();
+  // Pin the documented shape: the run subcommand, estimate-only, a ceiling.
+  assert.equal(argv[0], "run");
+  assert.ok(argv.includes("--estimate-only"), "the documented first run must be --estimate-only");
+  assert.ok(argv.includes("--max-usd"), "--max-usd is required and must appear in the README command");
+  const stdout = sink();
+  const stderr = sink();
+  const code = await main(argv, { env: {}, stdout, stderr });
+
+  assert.equal(code, 0, `expected exit 0, got ${code}; stderr: ${stderr.text}`);
+  assert.match(stdout.text, /estimated spend \(upper bound\): \$\d+\.\d{4} over 4 call\(s\)/);
+  assert.match(stdout.text, /priced: 4 reader\(s\)/);
+  assert.match(stdout.text, /runnable now: 0 of 4 reader\(s\) have a key/);
+  assert.match(stdout.text, /no model was called; nothing was spent\./);
+  // Missing keys are reported, not fatal.
+  assert.match(stderr.text, /SKIPPED reader .*: ANTHROPIC_API_KEY is not set/);
+  assert.match(stderr.text, /SKIPPED reader .*: OPENAI_API_KEY is not set/);
+  // The estimate is a real number priced off the bundled table, not zero.
+  const usd = Number(stdout.text.match(/\$(\d+\.\d{4})/)[1]);
+  assert.ok(usd > 0 && usd <= 1, `estimate ${usd} should be >0 and within the ceiling`);
+});
+
+test("--estimate-only prices the whole panel, so a missing key does not change the number", async () => {
+  const base = readmeFirstRunArgv();
+  const noKeys = sink();
+  await main(base, { env: {}, stdout: noKeys, stderr: sink() });
+  const allKeys = sink();
+  await main(base, { env: { ANTHROPIC_API_KEY: "x", OPENAI_API_KEY: "y" }, stdout: allKeys, stderr: sink() });
+
+  const usd = (t) => t.match(/\$(\d+\.\d{4})/)[1];
+  assert.equal(usd(noKeys.text), usd(allKeys.text), "the estimate must not depend on which keys are set");
+  assert.match(noKeys.text, /runnable now: 0 of 4/);
+  assert.match(allKeys.text, /runnable now: 4 of 4/);
+});
+
+test("a real run with no key still refuses (exit 3) -- only --estimate-only is key-free", async () => {
+  const { base, out } = setup();
+  const err = sink();
+  const code = await main([...base, "--max-usd", "1", "--out", out], { env: {}, stdout: sink(), stderr: err });
+  assert.equal(code, EXIT.refused);
+  assert.match(err.text, /REFUSED: no reader can run/);
+  assert.equal(existsSync(out), false);
+});
+
+// --- --version and the 64/70 exit-code split -------------------------------
+
+test("--version and -V print the version and exit 0", async () => {
+  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  for (const flag of ["--version", "-V"]) {
+    const out = sink();
+    assert.equal(await main([flag], { stdout: out, stderr: sink() }), 0, flag);
+    assert.equal(out.text.trim(), pkg.version, flag);
+  }
+});
+
+test("an unexpected internal error exits 70, not 64", async () => {
+  const { base, out } = setup();
+  const err = sink();
+  const code = await main([...base, "--max-usd", "1", "--out", out], {
+    env: {},
+    stdout: sink(),
+    stderr: err,
+    deps: { clientFor: () => { throw new TypeError("simulated bug"); } },
+  });
+  assert.equal(code, EXIT.internal, "a bug must not masquerade as a usage error");
+  assert.equal(EXIT.internal, 70);
+  assert.match(err.text, /internal error: /);
+  assert.match(err.text, /simulated bug/);
+  // It must not collide with a verdict code.
+  assert.ok(![EXIT.pass, EXIT.conditional, EXIT.fail].includes(code));
+});
+
+test("64 still means a bad command line or bad input files", async () => {
+  const { base, out } = setup();
+  // A missing input file.
+  const missing = base.map((a) => (a.endsWith("mini/tools.json") ? join(FIXTURES, "nope/tools.json") : a));
+  const err1 = sink();
+  assert.equal(
+    await main([...missing, "--max-usd", "1", "--out", out], { env: {}, stdout: sink(), stderr: err1, deps: deps() }),
+    EXIT.usage,
+  );
+  assert.match(err1.text, /could not read inputs/);
+  // A RunError with code USAGE from inside run() -- not an internal error.
+  const err2 = sink();
+  assert.equal(
+    await main([...base, "--max-usd", "1", "--out", out, "--personas", "no-such-persona"], {
+      env: {},
+      stdout: sink(),
+      stderr: err2,
+      deps: deps(),
+    }),
+    EXIT.usage,
+  );
+  assert.match(err2.text, /unknown persona no-such-persona/);
+});
+
+// Structurally-invalid INPUT is the caller's mistake (64), never a bug in this
+// tool (70). Regression test for the review finding on this PR: inputs.mjs and
+// buildPanel throw plain Errors, which fell through to the internal-error
+// branch and reported a stack trace and exit 70 for a malformed tools.json.
+test("structurally-invalid inputs exit 64 with no stack trace, not 70", async () => {
+  const { dir, base, out } = setup();
+  const write = (name, body) => {
+    const f = join(dir, name);
+    writeFileSync(f, typeof body === "string" ? body : JSON.stringify(body));
+    return f;
+  };
+  const swap = (flag, file) => {
+    const a = [...base];
+    a[a.indexOf(flag) + 1] = file;
+    return a;
+  };
+
+  const cases = [
+    ["tools payload with no tools array", swap("--tools", write("t.json", { nope: 1 })), /expected a non-empty tools array/],
+    ["a tool with no name", swap("--tools", write("t2.json", { tools: [{ description: "x" }] })), /needs a string `name`/],
+    ["truth that covers nothing", swap("--truth", write("tr.md", "# not a tool section\n")), /truth:/],
+    ["requests that are not an array", swap("--requests", write("r.json", { nope: 1 })), /requests: expected a non-empty array/],
+    ["a request naming a tool that is not in the payload", swap("--requests", write("r2.json", [
+      { id: "q1", request: "x", expected: "no_such_tool" },
+    ])), /which is not a tool in the payload/],
+  ];
+
+  for (const [label, argv, expected] of cases) {
+    const err = sink();
+    const code = await main([...argv, "--max-usd", "1", "--out", out], { env: {}, stdout: sink(), stderr: err, deps: deps() });
+    assert.equal(code, EXIT.usage, `${label}: expected 64, got ${code} -- stderr: ${err.text}`);
+    assert.match(err.text, expected, label);
+    assert.doesNotMatch(err.text, /internal error/, `${label}: must not be reported as an internal error`);
+    assert.doesNotMatch(err.text, / {4}at /, `${label}: must not print a stack trace`);
+  }
+});
+
+test("a bad panel is a usage error too (plain Error from buildPanel)", async () => {
+  const { base, out } = setup();
+  const argv = [...base];
+  argv[argv.indexOf("--models") + 1] = ",";   // parses to an empty model list
+  const err = sink();
+  const code = await main([...argv, "--max-usd", "1", "--out", out], { env: {}, stdout: sink(), stderr: err, deps: deps() });
+  assert.equal(code, EXIT.usage, `expected 64, got ${code} -- stderr: ${err.text}`);
+  assert.doesNotMatch(err.text, /internal error/);
+});
+
+// package.json must keep the fields npm provenance needs. The release workflow
+// publishes with --provenance, and npm requires `repository` to match the
+// source repo for the Sigstore attestation -- a missing field fails the publish
+// AFTER the tag is pushed, which is unrecoverable (npm will not accept a
+// re-publish of the same version).
+test("package.json carries the repository field npm provenance requires", () => {
+  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(typeof pkg.repository?.url, "string", "no repository.url: --provenance would fail at publish time");
+  assert.match(pkg.repository.url, /github\.com\/Kromatic-Innovation\/aux-comprehension-test/);
+  assert.equal(pkg.publishConfig.access, "public");
+  // Everything the CLI needs at runtime has to be in the tarball.
+  for (const entry of ["bin", "src", "data", "prompts", "personas"]) {
+    assert.ok(pkg.files.includes(entry), `files is missing ${entry}`);
+  }
 });

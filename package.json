@@ -4,6 +4,14 @@
   "description": "Blind, cross-model comprehension test for MCP tool copy: reader models teach back a tools/list payload, route realistic requests, and report confusion; graded against author-written ground truth into a cut-list and a pass/conditional/fail verdict.",
   "license": "Apache-2.0",
   "author": "Kromatic",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kromatic-Innovation/aux-comprehension-test.git"
+  },
+  "homepage": "https://github.com/Kromatic-Innovation/aux-comprehension-test#readme",
+  "bugs": {
+    "url": "https://github.com/Kromatic-Innovation/aux-comprehension-test/issues"
+  },
   "keywords": [
     "mcp",
     "model-context-protocol",
@@ -26,8 +34,14 @@
     "prompts",
     "personas",
     "data",
-    "NOTICE"
+    "LICENSE",
+    "NOTICE",
+    "README.md"
   ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "test": "node --test test/*.test.mjs"
   },
