@@ -29,6 +29,24 @@ The run directory is uploaded as a workflow artifact. A conditional or fail
 verdict is a result, not a broken eval: the job fails only when the run was
 refused or the inputs were invalid.
 
+## Credentials
+
+Either route works, and the workflow picks one automatically:
+
+| Route | Set this | How it is used |
+|---|---|---|
+| 1Password (primary) | `OP_SERVICE_ACCOUNT_TOKEN` | `1password/load-secrets-action` resolves the `op://` references and exports the provider keys |
+| Plain repository secrets | `ANTHROPIC_API_KEY` and/or `OPENAI_API_KEY` | The 1Password step is skipped entirely and the run step uses these directly |
+
+The workflow checks for `OP_SERVICE_ACCOUNT_TOKEN` first and prints which
+route it took. Plain secrets are the fallback, so a repo that has not been
+given a 1Password service account can still run the eval with nothing but a
+provider key. If both are present, 1Password wins.
+
+A provider with no key on either route is skipped and reported, not failed. If
+**no** provider has a key the run is refused (exit 3) and the job fails — a
+live eval with no credentials at all is a misconfiguration, not a result.
+
 Locally, the same thing is just the CLI with real keys in the environment:
 
 ```bash

@@ -26,13 +26,62 @@ host, a cautious agent, a technical-term searcher and a literal reader.
 > pre-filter: the copy survived blind readers from more than one provider. It is
 > not proof that any host will route correctly.
 
+> **Live runs need provider API keys and cost money.** Every reader and judge
+> call is billed to your own provider account. `--max-usd` is required, has no
+> default, and refuses to start when the pre-run estimate is over your ceiling.
+> The first run below needs no key and spends nothing.
+
 ## Install
 
 Requires Node 20 or later.
 
 ```bash
+# Works today, before the first npm release:
+npm install -g github:Kromatic-Innovation/aux-comprehension-test
+
+# Works once 0.1.0 is on npm:
 npm install -g aux-comprehension-test
 ```
+
+`aux-comprehension-test` is **not on npm yet**. The `github:` form is the one
+that works today; it installs the same package contents as the npm release
+will. 0.1.0 publishes from a reviewed `v0.1.0` tag.
+
+## First run (no key, no spend)
+
+Ask for the estimate instead of the run. `--estimate-only` reads your real
+inputs, builds the real reader prompts, prices them against the bundled table,
+and prints the upper bound — without calling any model and without needing a
+provider key:
+
+```bash
+aux-comprehension-test run \
+  --tools test/fixtures/mini/tools.json \
+  --truth test/fixtures/mini/truth.md \
+  --requests test/fixtures/mini/requests.json \
+  --models claude-haiku-4-5,gpt-5 \
+  --max-usd 1 \
+  --estimate-only
+```
+
+```
+SKIPPED reader small-context-host x claude-haiku-4-5: ANTHROPIC_API_KEY is not set
+SKIPPED reader cautious-agent x gpt-5: OPENAI_API_KEY is not set
+...
+estimated spend (upper bound): $0.2507 over 4 call(s)
+priced: 4 reader(s), ceiling $1
+runnable now: 0 of 4 reader(s) have a key
+no model was called; nothing was spent.
+```
+
+Missing keys are reported, not fatal: the estimate covers the whole panel your
+command line names, so the number does not change when you add a key. Exit
+code is 0.
+
+The paths above are the example payload committed to this repository, so run
+that command from a clone. Nothing about `--estimate-only` depends on it —
+installed globally, point the same three flags at your own `tools.json`,
+`truth.md` and `requests.json`.
 
 ## Usage
 
@@ -101,7 +150,13 @@ version control.
 ### Exit codes
 
 `0` pass, `1` conditional, `2` fail, `3` refused (over budget, an unpriced
-model, or no reader could run; nothing was called), `64` usage error.
+model, or no reader could run; nothing was called), `64` usage error (your
+command line or input files), `70` internal error (a bug in this tool).
+
+`0`-`2` are verdicts, so a crash never reuses them: a caller can always tell a
+result from a failure. `64` and `70` are the sysexits `EX_USAGE` / `EX_SOFTWARE`
+split — a bug used to report as `64`, which told you to go fix a correct
+command line.
 
 ## How it grades
 
@@ -147,8 +202,13 @@ CLI estimates an upper bound on spend (the exact prompt each call will send, at
 chars / 4 tokens, plus each call's full output cap) and refuses to start if the
 estimate is over the ceiling. A model with no known price also refuses the run:
 it is never priced at zero. The bundled table in `data/prices.json` covers
-current Anthropic models and OpenAI `gpt-5` (standard tier, verified against
-OpenAI's pricing page on the date recorded in the file's `sources` block).
+current Anthropic models and OpenAI `gpt-5` (standard tier). Each provider's
+entry under that file's `sources` block records the pricing page the numbers
+were verified against and the date they were read, so a stale table is visible
+rather than silent. One limitation is recorded there too: `claude-haiku-5-5` is
+priced by prompt length, and the bundled entry is the up-to-100,000-token tier
+— pass `--prices` with the higher tier for a payload near or over that
+threshold.
 Prices match the exact id or a `-YYYYMMDD` / `@...` snapshot of it only, so
 `gpt-5-pro`, `gpt-5-mini` and dashed-date snapshots are unpriced until you add
 them. Pass `--prices <file>` for any other model:
@@ -182,6 +242,27 @@ const result = await run(
 An injected client has panelist's adapter shape:
 `{ model, complete({ prompt, maxTokens }) -> { ok, text, model, usage? } }`.
 
+### Stable surface
+
+Exactly these exports are public and documented. Each one has a direct test,
+and `test/public-api.test.mjs` fails if this list and the package's actual
+exports drift apart:
+
+| Export | What it is |
+|---|---|
+| `run(opts, deps?)` | One comprehension-test run, end to end. Returns the result object written to `verdict.json` |
+| `RunError` | Thrown by `run`. `.code` is `"REFUSED"` (nothing was called) or `"USAGE"` (bad inputs) |
+| `VERSION` | This package's version |
+| `HOST_CAVEAT` | The sentence every output carries about what a pass does and does not mean |
+| `main(argv, io?)` | The CLI as a function. Returns the exit code; writes nothing to the real stdio unless you let it |
+| `EXIT` | The exit-code map (`pass`, `conditional`, `fail`, `refused`, `usage`, `internal`) |
+
+**Every other name re-exported from the package root is an unstable
+internal.** The graders, prompt builders, persona registry, cost functions and
+provider clients are exported so the test suite and the workspace skill can
+reach them; they may change shape in any `0.x` release without a major bump.
+Depend on them only if you are willing to pin an exact version.
+
 ## Development
 
 ```bash
@@ -192,6 +273,12 @@ The suite is offline: every reader and judge is scripted and network access is
 disabled. It includes a fixture test over a real server's copy before and
 after a copy revision (`test/fixtures/neumann/`). The live cross-model run is a
 manual eval; see [`eval/README.md`](eval/README.md).
+
+## Maintainer
+
+Maintained by Kromatic. For bugs and features, open an issue on this
+repository. For anything security-sensitive, do **not** open a public issue —
+email **security@kromatic.com** instead (see [SECURITY.md](SECURITY.md)).
 
 ## License
 
