@@ -63,15 +63,30 @@ export async function run(opts, deps = {}) {
   if (!(typeof opts.maxUsd === "number" && Number.isFinite(opts.maxUsd) && opts.maxUsd > 0)) {
     throw new RunError("USAGE", "--max-usd is required and must be a positive number; there is no default");
   }
-  const payload = normalizePayload(opts.tools);
-  const truth = parseTruth(opts.truth);
-  checkTruthCoverage(truth, payload);
-  const requests = normalizeRequests(opts.requests, payload);
+  // inputs.mjs and buildPanel throw plain Errors -- they have no opinion about
+  // exit codes. Every one of those is the CALLER's input being wrong, so they
+  // surface as USAGE (exit 64), never as a bug in this tool (exit 70). Applied
+  // per call rather than around the whole block on purpose:
+  // registerReaderPersonas() reads this package's own bundled personas, so if
+  // it fails the package is broken and that IS an internal error.
+  const asUsage = (fn) => {
+    try {
+      return fn();
+    } catch (err) {
+      if (err instanceof RunError) throw err;
+      throw new RunError("USAGE", err.message);
+    }
+  };
+
+  const payload = asUsage(() => normalizePayload(opts.tools));
+  const truth = asUsage(() => parseTruth(opts.truth));
+  asUsage(() => checkTruthCoverage(truth, payload));
+  const requests = asUsage(() => normalizeRequests(opts.requests, payload));
 
   registerReaderPersonas();
   const personaIds = opts.personas?.length ? opts.personas : DEFAULT_PERSONA_IDS;
   for (const id of personaIds) if (!getPersona(id)) throw new RunError("USAGE", `unknown persona ${id}; known: ${DEFAULT_PERSONA_IDS.join(", ")}`);
-  const panel = buildPanel({ personaIds, models: opts.models, maxReaders: opts.maxReaders });
+  const panel = asUsage(() => buildPanel({ personaIds, models: opts.models, maxReaders: opts.maxReaders }));
 
   const active = [];
   const skipped = [];

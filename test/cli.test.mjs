@@ -233,3 +233,66 @@ test("64 still means a bad command line or bad input files", async () => {
   );
   assert.match(err2.text, /unknown persona no-such-persona/);
 });
+
+// Structurally-invalid INPUT is the caller's mistake (64), never a bug in this
+// tool (70). Regression test for the review finding on this PR: inputs.mjs and
+// buildPanel throw plain Errors, which fell through to the internal-error
+// branch and reported a stack trace and exit 70 for a malformed tools.json.
+test("structurally-invalid inputs exit 64 with no stack trace, not 70", async () => {
+  const { dir, base, out } = setup();
+  const write = (name, body) => {
+    const f = join(dir, name);
+    writeFileSync(f, typeof body === "string" ? body : JSON.stringify(body));
+    return f;
+  };
+  const swap = (flag, file) => {
+    const a = [...base];
+    a[a.indexOf(flag) + 1] = file;
+    return a;
+  };
+
+  const cases = [
+    ["tools payload with no tools array", swap("--tools", write("t.json", { nope: 1 })), /expected a non-empty tools array/],
+    ["a tool with no name", swap("--tools", write("t2.json", { tools: [{ description: "x" }] })), /needs a string `name`/],
+    ["truth that covers nothing", swap("--truth", write("tr.md", "# not a tool section\n")), /truth:/],
+    ["requests that are not an array", swap("--requests", write("r.json", { nope: 1 })), /requests: expected a non-empty array/],
+    ["a request naming a tool that is not in the payload", swap("--requests", write("r2.json", [
+      { id: "q1", request: "x", expected: "no_such_tool" },
+    ])), /which is not a tool in the payload/],
+  ];
+
+  for (const [label, argv, expected] of cases) {
+    const err = sink();
+    const code = await main([...argv, "--max-usd", "1", "--out", out], { env: {}, stdout: sink(), stderr: err, deps: deps() });
+    assert.equal(code, EXIT.usage, `${label}: expected 64, got ${code} -- stderr: ${err.text}`);
+    assert.match(err.text, expected, label);
+    assert.doesNotMatch(err.text, /internal error/, `${label}: must not be reported as an internal error`);
+    assert.doesNotMatch(err.text, / {4}at /, `${label}: must not print a stack trace`);
+  }
+});
+
+test("a bad panel is a usage error too (plain Error from buildPanel)", async () => {
+  const { base, out } = setup();
+  const argv = [...base];
+  argv[argv.indexOf("--models") + 1] = ",";   // parses to an empty model list
+  const err = sink();
+  const code = await main([...argv, "--max-usd", "1", "--out", out], { env: {}, stdout: sink(), stderr: err, deps: deps() });
+  assert.equal(code, EXIT.usage, `expected 64, got ${code} -- stderr: ${err.text}`);
+  assert.doesNotMatch(err.text, /internal error/);
+});
+
+// package.json must keep the fields npm provenance needs. The release workflow
+// publishes with --provenance, and npm requires `repository` to match the
+// source repo for the Sigstore attestation -- a missing field fails the publish
+// AFTER the tag is pushed, which is unrecoverable (npm will not accept a
+// re-publish of the same version).
+test("package.json carries the repository field npm provenance requires", () => {
+  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(typeof pkg.repository?.url, "string", "no repository.url: --provenance would fail at publish time");
+  assert.match(pkg.repository.url, /github\.com\/Kromatic-Innovation\/aux-comprehension-test/);
+  assert.equal(pkg.publishConfig.access, "public");
+  // Everything the CLI needs at runtime has to be in the tarball.
+  for (const entry of ["bin", "src", "data", "prompts", "personas"]) {
+    assert.ok(pkg.files.includes(entry), `files is missing ${entry}`);
+  }
+});
