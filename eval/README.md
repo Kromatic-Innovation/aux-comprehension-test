@@ -35,13 +35,14 @@ Either route works, and the workflow picks one automatically:
 
 | Route | Set this | How it is used |
 |---|---|---|
-| 1Password (primary) | `OP_SERVICE_ACCOUNT_TOKEN` | `1password/load-secrets-action` resolves the `op://` references and exports the provider keys |
-| Plain repository secrets | `ANTHROPIC_API_KEY` and/or `OPENAI_API_KEY` | The 1Password step is skipped entirely and the run step uses these directly |
+| Secret store step (optional) | Your CI secret store's token, if your workflow resolves keys from one | A step in `eval-live-panel.yml` loads the provider keys from your secret store and exports them for the run step |
+| Plain repository secrets | `ANTHROPIC_API_KEY` and/or `OPENAI_API_KEY` | The secret-store step is skipped entirely and the run step uses these directly |
 
-The workflow checks for `OP_SERVICE_ACCOUNT_TOKEN` first and prints which
-route it took. Plain secrets are the fallback, so a repo that has not been
-given a 1Password service account can still run the eval with nothing but a
-provider key. If both are present, 1Password wins.
+The workflow prints which route it took. Plain repository secrets are the
+fallback, so a fork that has no secret store configured can still run the eval
+with nothing but a provider key. Provide the provider API keys via your CI
+secret store or as plain repository secrets. If both are present, the secret
+store wins.
 
 A provider with no key on either route is skipped and reported, not failed. If
 **no** provider has a key the run is refused (exit 3) and the job fails — a
