@@ -41,4 +41,4 @@ Release body.
   one works today, a no-key first run, and the stable library surface (every
   other root export is an unstable internal).
 - The manual live eval accepts plain `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
-  repository secrets as well as 1Password.
+  repository secrets as well as a CI secret store.
