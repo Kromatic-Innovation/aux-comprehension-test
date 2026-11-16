@@ -5,6 +5,11 @@
 // cap for that call. It fails closed: a model with no known price throws
 // instead of being priced at zero, because a zero price would silently
 // satisfy any --max-usd.
+//
+// A price entry may carry one prompt-length tier:
+//   { "input": 0.1, "output": 0.5, "above": { "tokens": 100000, "input": 0.5, "output": 2.5 } }
+// A call whose input tokens are over `above.tokens` is priced entirely at the
+// `above` rates, in the estimate and in actual-spend reporting alike.
 
 import { readFileSync } from "node:fs";
 import { readJsonAsset } from "./assets.mjs";
@@ -34,8 +39,28 @@ export function priceFor(model, prices) {
 
 export const approxTokens = (text) => Math.ceil(String(text).length / 4);
 
+const positive = (n) => typeof n === "number" && Number.isFinite(n) && n > 0;
+
+/**
+ * True when a price entry is usable. A malformed `above` tier makes the whole
+ * entry unpriced rather than silently falling back to the lower tier, which
+ * would under-state the bound for exactly the large prompts the tier exists for.
+ */
+export function validPrice(price) {
+  if (!price) return false;
+  if (price.above === undefined) return true;
+  const a = price.above;
+  return Boolean(a) && positive(a.tokens) && positive(a.input) && positive(a.output);
+}
+
+/** The rates that apply to one call: the `above` tier once input tokens are over its threshold. */
+export function rateFor(price, inputTokens) {
+  return price.above && inputTokens > price.above.tokens ? price.above : price;
+}
+
 export function usd({ inputTokens, outputTokens }, price) {
-  return (inputTokens * price.input + outputTokens * price.output) / 1e6;
+  const rate = rateFor(price, inputTokens);
+  return (inputTokens * rate.input + outputTokens * rate.output) / 1e6;
 }
 
 /**
@@ -43,11 +68,12 @@ export function usd({ inputTokens, outputTokens }, price) {
  * @returns {{ usd: number, calls: object[] }}
  */
 export function estimate(calls, prices) {
-  const unknown = [...new Set(calls.filter((c) => !priceFor(c.model, prices)).map((c) => c.model))];
+  const unknown = [...new Set(calls.filter((c) => !validPrice(priceFor(c.model, prices))).map((c) => c.model))];
   if (unknown.length) {
     const err = new Error(
       `no price known for ${unknown.join(", ")}; refusing to estimate spend as zero. ` +
-        `Pass --prices <file.json> with {"models": {"<id>": {"input": <usd/Mtok>, "output": <usd/Mtok>}}}.`,
+        `Pass --prices <file.json> with {"models": {"<id>": {"input": <usd/Mtok>, "output": <usd/Mtok>}}} ` +
+        `(optionally "above": {"tokens": <N>, "input": <usd/Mtok>, "output": <usd/Mtok>} for a prompt-length tier).`,
     );
     err.code = "UNKNOWN_PRICE";
     throw err;
@@ -86,7 +112,7 @@ export function actual(ledger, prices) {
   let total = 0;
   const rows = ledger.map((e) => {
     const p = priceFor(e.model, prices);
-    const cost = p ? usd(e, p) : null;
+    const cost = validPrice(p) ? usd(e, p) : null;
     if (cost != null) total += cost;
     return { ...e, usd: cost };
   });

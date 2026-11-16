@@ -1,0 +1,6 @@
+[
+  { "id": "q1", "request": "How many credits will a 10,000-trial run cost?", "expected": "estimate_run_cost", "nearMiss": "forecast_probability" },
+  { "id": "q2", "request": "What are the odds the launch slips past June?", "expected": "forecast_probability", "nearMiss": "estimate_run_cost" },
+  { "id": "q3", "request": "Remove the report rep_42 for good.", "expected": "delete_saved_report" },
+  { "id": "q4", "request": "Translate this paragraph into French.", "expected": "none" }
+]

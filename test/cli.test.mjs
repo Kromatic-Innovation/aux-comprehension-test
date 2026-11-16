@@ -8,10 +8,10 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { main, EXIT } from "../src/cli.mjs";
 import { FIXTURES, mockClientFor, resetRegistry, TEST_PRICES } from "./_mock.mjs";
 import { miniReader } from "./_mini.mjs";
+import { readmeFirstRunArgv } from "./_readme.mjs";
 
 beforeEach(resetRegistry);
 
@@ -117,25 +117,6 @@ test("without --judge the summary says pass is withheld and why", async () => {
 // price table, with an empty environment -- exactly what a reader who has just
 // installed the package and set no key gets. If this test needs a mock to
 // pass, the README is lying.
-
-/**
- * The argv of the FIRST fenced bash command under README.md's "## First run"
- * heading, with repo-relative input paths resolved. The test below runs the
- * README's own command text, so the documented first run and the tested first
- * run cannot drift apart.
- */
-function readmeFirstRunArgv() {
-  const root = new URL("../", import.meta.url);
-  const readme = readFileSync(new URL("README.md", root), "utf8");
-  const start = readme.indexOf("## First run");
-  assert.ok(start > 0, "README.md has no '## First run' heading");
-  const fence = readme.indexOf("```bash", start);
-  assert.ok(fence > 0, "no fenced bash block under README.md's '## First run'");
-  const body = readme.slice(fence + "```bash".length, readme.indexOf("```", fence + 7));
-  const tokens = body.replace(/\\\n/g, " ").trim().split(/\s+/);
-  assert.equal(tokens[0], "aux-comprehension-test", `first-run block does not invoke the CLI: ${tokens[0]}`);
-  return tokens.slice(1).map((t) => (t.startsWith("test/fixtures/") ? fileURLToPath(new URL(t, root)) : t));
-}
 
 test("the README's first run works with no provider key and spends nothing", async () => {
   const argv = readmeFirstRunArgv();

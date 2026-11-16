@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { runMini } from "./_mini.mjs";
 import { resetRegistry, TEST_PRICES } from "./_mock.mjs";
 import { readFileSync } from "node:fs";
-import { estimate, priceFor, loadPrices } from "../src/cost.mjs";
+import { estimate, priceFor, loadPrices, actual, validPrice } from "../src/cost.mjs";
 
 beforeEach(resetRegistry);
 
@@ -77,7 +77,11 @@ test("estimate counts the full output cap per call", () => {
 test("the bundled price table loads and has no zero prices", () => {
   const prices = loadPrices();
   assert.ok(Object.keys(prices).length > 0);
-  for (const [id, p] of Object.entries(prices)) assert.ok(p.input > 0 && p.output > 0, id);
+  for (const [id, p] of Object.entries(prices)) {
+    assert.ok(p.input > 0 && p.output > 0, id);
+    if (p.above) assert.ok(p.above.tokens > 0 && p.above.input >= p.input && p.above.output >= p.output, `${id} above tier`);
+    assert.ok(validPrice(p), id);
+  }
 });
 
 // The workspace skill's default panel (its "Default model matrix"): current
@@ -105,4 +109,75 @@ test("an OpenAI variant or dashed-date snapshot of a bundled id stays unpriced",
   const prices = loadPrices();
   assert.equal(priceFor("gpt-5-pro", prices), null);
   assert.equal(priceFor("gpt-5-2025-08-07", prices), null);
+});
+
+// --- Prompt-length tiers: the estimate stays an upper bound. ---------------
+
+const TIERED = { input: 1, output: 5, above: { tokens: 1000, input: 5, output: 25 } };
+const call = (chars) => ({ purpose: "r", model: "tiered", prompt: "x".repeat(chars), maxTokens: 100 });
+
+test("a prompt over a tier's threshold is estimated at the higher tier", () => {
+  const over = estimate([call(4004)], { tiered: TIERED }); // 1001 input tokens
+  assert.equal(over.calls[0].inputTokens, 1001);
+  assert.equal(over.usd, (1001 * 5 + 100 * 25) / 1e6);
+});
+
+test("a prompt at or under a tier's threshold uses the lower tier", () => {
+  const at = estimate([call(4000)], { tiered: TIERED }); // exactly 1000
+  assert.equal(at.usd, (1000 * 1 + 100 * 5) / 1e6);
+  const under = estimate([call(400)], { tiered: TIERED });
+  assert.equal(under.usd, (100 * 1 + 100 * 5) / 1e6);
+});
+
+test("the higher tier refuses a run the lower tier would have let through", async () => {
+  // The mini payload's reader prompts are far over 10 tokens, so every call
+  // lands in the `above` tier.
+  const lower = { "claude-haiku-4-5": { input: 1, output: 5 }, "gpt-5": { input: 1, output: 5 } };
+  const tiered = {
+    "claude-haiku-4-5": { input: 1, output: 5, above: { tokens: 10, input: 5, output: 25 } },
+    "gpt-5": { input: 1, output: 5, above: { tokens: 10, input: 5, output: 25 } },
+  };
+  const low = await runMini({ judge: null, prices: lower, estimateOnly: true });
+  const high = await runMini({ judge: null, prices: tiered, estimateOnly: true });
+  assert.ok(Math.abs(high.estimate.usd - 5 * low.estimate.usd) < 1e-12, "every call priced at the 5x tier");
+  const maxUsd = (low.estimate.usd + high.estimate.usd) / 2;
+
+  const passes = await runMini({ judge: null, prices: lower, estimateOnly: true, maxUsd });
+  assert.equal(passes.status, "estimate");
+  const calls = { n: 0 };
+  await assert.rejects(
+    runMini({ judge: null, prices: tiered, maxUsd, calls }),
+    (err) => err.code === "REFUSED" && /exceeds --max-usd/.test(err.message),
+  );
+  assert.equal(calls.n, 0);
+});
+
+test("actual spend applies the same tier rule per call", () => {
+  const ledger = [
+    { purpose: "r", model: "tiered", inputTokens: 1001, outputTokens: 10 },
+    { purpose: "r", model: "tiered", inputTokens: 1000, outputTokens: 10 },
+  ];
+  const res = actual(ledger, { tiered: TIERED });
+  assert.equal(res.calls[0].usd, (1001 * 5 + 10 * 25) / 1e6);
+  assert.equal(res.calls[1].usd, (1000 * 1 + 10 * 5) / 1e6);
+});
+
+test("a malformed tier refuses rather than falling back to the lower tier", () => {
+  for (const above of [null, {}, { tokens: 1000, input: 5 }, { tokens: 0, input: 5, output: 25 }, { tokens: 1000, input: "5", output: 25 }]) {
+    assert.equal(validPrice({ input: 1, output: 5, above }), false, JSON.stringify(above));
+    assert.throws(() => estimate([call(40)], { tiered: { input: 1, output: 5, above } }), (err) => err.code === "UNKNOWN_PRICE");
+  }
+  assert.equal(validPrice(TIERED), true);
+  assert.equal(validPrice({ input: 1, output: 5 }), true);
+});
+
+test("an unpriced model still refuses alongside a tiered one", () => {
+  assert.throws(() => estimate([call(40), { ...call(40), model: "nope" }], { tiered: TIERED }), (err) => err.code === "UNKNOWN_PRICE" && /nope/.test(err.message));
+});
+
+test("bundled claude-haiku-5-5 carries its over-100,000-token tier", () => {
+  const p = loadPrices()["claude-haiku-5-5"];
+  assert.deepEqual(p, { input: 0.1, output: 0.5, above: { tokens: 100000, input: 0.5, output: 2.5 } });
+  const big = estimate([{ purpose: "r", model: "claude-haiku-5-5", prompt: "x".repeat(400004), maxTokens: 1000 }], loadPrices());
+  assert.equal(big.usd, (100001 * 0.5 + 1000 * 2.5) / 1e6);
 });
