@@ -47,6 +47,8 @@ npm install -g aux-comprehension-test
 that works today; it installs the same package contents as the npm release
 will. 0.1.0 publishes from a reviewed `v0.1.0` tag.
 
+Running from a git checkout instead? Run `npm ci` in it first.
+
 ## First run (no key, no spend)
 
 Ask for the estimate instead of the run. `--estimate-only` reads your real
@@ -56,9 +58,9 @@ provider key:
 
 ```bash
 aux-comprehension-test run \
-  --tools test/fixtures/mini/tools.json \
-  --truth test/fixtures/mini/truth.md \
-  --requests test/fixtures/mini/requests.json \
+  --tools "$(npm root -g)/aux-comprehension-test/examples/mini/tools.json" \
+  --truth "$(npm root -g)/aux-comprehension-test/examples/mini/truth.md" \
+  --requests "$(npm root -g)/aux-comprehension-test/examples/mini/requests.json" \
   --models claude-haiku-4-5,gpt-5 \
   --max-usd 1 \
   --estimate-only
@@ -67,7 +69,8 @@ aux-comprehension-test run \
 ```
 SKIPPED reader small-context-host x claude-haiku-4-5: ANTHROPIC_API_KEY is not set
 SKIPPED reader cautious-agent x gpt-5: OPENAI_API_KEY is not set
-...
+SKIPPED reader technical-term-searcher x claude-haiku-4-5: ANTHROPIC_API_KEY is not set
+SKIPPED reader literal-reader x gpt-5: OPENAI_API_KEY is not set
 estimated spend (upper bound): $0.2507 over 4 call(s)
 priced: 4 reader(s), ceiling $1
 runnable now: 0 of 4 reader(s) have a key
@@ -78,9 +81,10 @@ Missing keys are reported, not fatal: the estimate covers the whole panel your
 command line names, so the number does not change when you add a key. Exit
 code is 0.
 
-The paths above are the example payload committed to this repository, so run
-that command from a clone. Nothing about `--estimate-only` depends on it —
-installed globally, point the same three flags at your own `tools.json`,
+The paths above are the small example payload that ships in the package, under
+`examples/mini/` of the global install. From a git checkout, use
+`examples/mini/tools.json` and so on directly. Nothing about `--estimate-only`
+depends on the example: point the same three flags at your own `tools.json`,
 `truth.md` and `requests.json`.
 
 ## Usage
@@ -155,8 +159,7 @@ command line or input files), `70` internal error (a bug in this tool).
 
 `0`-`2` are verdicts, so a crash never reuses them: a caller can always tell a
 result from a failure. `64` and `70` are the sysexits `EX_USAGE` / `EX_SOFTWARE`
-split — a bug used to report as `64`, which told you to go fix a correct
-command line.
+codes: `64` means fix your command line or inputs, `70` means report a bug.
 
 ## How it grades
 
@@ -205,10 +208,13 @@ it is never priced at zero. The bundled table in `data/prices.json` covers
 current Anthropic models and OpenAI `gpt-5` (standard tier). Each provider's
 entry under that file's `sources` block records the pricing page the numbers
 were verified against and the date they were read, so a stale table is visible
-rather than silent. One limitation is recorded there too: `claude-haiku-5-5` is
-priced by prompt length, and the bundled entry is the up-to-100,000-token tier
-— pass `--prices` with the higher tier for a payload near or over that
-threshold.
+rather than silent. A price entry can carry one prompt-length tier,
+`"above": { "tokens": N, "input": ..., "output": ... }`: a call whose
+approximate input tokens are over `N` is priced at the `above` rates, in the
+estimate and in the actual spend, so the estimate stays an upper bound.
+`claude-haiku-5-5` is bundled this way (0.1 / 0.5 up to 100,000 input tokens,
+0.5 / 2.5 above). An `above` tier that is missing a field is treated as
+unpriced and refuses the run.
 Prices match the exact id or a `-YYYYMMDD` / `@...` snapshot of it only, so
 `gpt-5-pro`, `gpt-5-mini` and dashed-date snapshots are unpriced until you add
 them. Pass `--prices <file>` for any other model:

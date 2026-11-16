@@ -1,0 +1,22 @@
+{
+  "tools": [
+    {
+      "name": "estimate_run_cost",
+      "description": "Predicts how many credits a simulation run will cost, without running it. Free.",
+      "inputSchema": { "type": "object", "properties": { "trials": { "type": "integer", "description": "Number of trials." } }, "required": ["trials"] },
+      "annotations": { "readOnlyHint": true, "destructiveHint": false }
+    },
+    {
+      "name": "forecast_probability",
+      "description": "Forecasts the probability that an event happens by a date, with reasoning. Costs one credit.",
+      "inputSchema": { "type": "object", "properties": { "question": { "type": "string", "description": "The event and date." } }, "required": ["question"] },
+      "annotations": { "readOnlyHint": true, "destructiveHint": false }
+    },
+    {
+      "name": "delete_saved_report",
+      "description": "Permanently deletes one saved report by its id. Cannot be undone. Free.",
+      "inputSchema": { "type": "object", "properties": { "report_id": { "type": "string", "description": "The report to delete." } }, "required": ["report_id"] },
+      "annotations": { "readOnlyHint": false, "destructiveHint": true }
+    }
+  ]
+}

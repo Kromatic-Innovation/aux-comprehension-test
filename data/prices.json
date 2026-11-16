@@ -1,5 +1,5 @@
 {
-  "_note": "USD per million tokens, list price (standard tier). Provider prices change: verify before relying on an estimate, and pass --prices <file> to override or add models. A model with no entry here or in --prices makes the run refuse to start rather than be priced at zero. Matching is the exact id, or a dated snapshot of it (<id>-YYYYMMDD or <id>@...); any other variant is unpriced, including OpenAI's dashed-date snapshots (<id>-YYYY-MM-DD) and -pro/-mini variants. The ids bundled for each provider are listed under that provider's entry in `sources`, together with the page URL and the date the prices below were verified against it; supply any other provider or model with --prices.",
+  "_note": "USD per million tokens, list price (standard tier). Provider prices change: verify before relying on an estimate, and pass --prices <file> to override or add models. An entry may carry one prompt-length tier, `above`: {tokens, input, output}; a call whose input tokens are over `tokens` is priced at the `above` rates. A model with no entry here or in --prices makes the run refuse to start rather than be priced at zero. Matching is the exact id, or a dated snapshot of it (<id>-YYYYMMDD or <id>@...); any other variant is unpriced, including OpenAI's dashed-date snapshots (<id>-YYYY-MM-DD) and -pro/-mini variants. The ids bundled for each provider are listed under that provider's entry in `sources`, together with the page URL and the date the prices below were verified against it; supply any other provider or model with --prices.",
   "asOf": "2026-11",
   "sources": {
     "anthropic": {
@@ -16,7 +16,7 @@
         "claude-opus-5",
         "claude-opus-4-8"
       ],
-      "caveat": "claude-haiku-5-5 is priced by PROMPT LENGTH, which this table cannot express. The entry below is the up-to-100,000-token tier (0.1 / 0.5). Prompts over 100,000 tokens bill at 0.5 / 2.5 per 1M tokens, so an estimate for a payload that large under-states the bound by 5x. For a tools/list payload near or over that threshold, pass --prices with the higher tier."
+      "caveat": "claude-haiku-5-5 is priced by PROMPT LENGTH. Its entry carries both tiers: 0.1 / 0.5 per 1M tokens up to 100,000 input tokens, and an `above` tier of 0.5 / 2.5 for prompts over 100,000 tokens. Each call is priced at the tier its own input tokens fall in, in the pre-run estimate and in actual spend, so the estimate stays an upper bound for a large payload."
     },
     "openai": {
       "url": "https://developers.openai.com/api/docs/pricing",
@@ -26,7 +26,7 @@
     }
   },
   "models": {
-    "claude-haiku-5-5": { "input": 0.1, "output": 0.5 },
+    "claude-haiku-5-5": { "input": 0.1, "output": 0.5, "above": { "tokens": 100000, "input": 0.5, "output": 2.5 } },
     "claude-haiku-4-5": { "input": 1, "output": 5 },
     "claude-sonnet-5-5": { "input": 2, "output": 10 },
     "claude-sonnet-5": { "input": 2, "output": 10 },

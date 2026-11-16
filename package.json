@@ -34,9 +34,12 @@
     "prompts",
     "personas",
     "data",
+    "examples",
     "LICENSE",
     "NOTICE",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md",
+    "SECURITY.md"
   ],
   "publishConfig": {
     "access": "public",
