@@ -190,12 +190,22 @@ codes: `64` means fix your command line or inputs, `70` means report a bug.
   reason reads "judge failed: <reason>", not "no --judge"; `verdict.json`'s
   `judge.failures` records the stop reason, and the raw reply is saved under
   `judge/`.
+- **Must-fix needs a misreading.** A misreading is a routing miss (on the
+  expected tool, and on a tool picked wrongly) or teach-back drift the judge
+  confirmed against your ground truth. A confusion report is reported unease,
+  not a misreading: a cluster of confusion reports about a tool is
+  `informational`, however many readers raised it, unless some reader also
+  misread that tool. The readers' words stay in the row so you still see them,
+  and if the judge's re-read finds the copy ambiguous the row is flagged
+  `consider`. Neither moves the verdict. (A length complaint promoted by
+  `--length-benchmark` is exempt: the benchmark is the evidence.)
 - **Reader error vs. copy defect.** A defect tripped by exactly one reader,
   where the copy is unambiguous on re-read, is a reader error, not a must-fix.
   The judge does the re-read; without one the row is marked
   `unverified (no judge)`, and when the judge was configured but failed it is
   marked `unverified (judge failed: <reason>)`. A defect
-  tripped by two or more readers is a must-fix.
+  tripped by two or more readers is a must-fix (for confusion, only with a
+  misreading, above).
 - **Length-only complaints are informational.** "Too long" is not a copy defect
   at current token budgets. It counts only when you pass `--length-benchmark`
   with evidence that your copy is materially longer than comparable tools **and**
@@ -357,7 +367,7 @@ A completed run resolves to the object written to `verdict.json`:
     providers: ["anthropic", "openai"],
     withheldPass: [],                 // why not pass; empty when verdict is "pass"
     counts: { structural, mustFix, readerError, informational },
-    cutList: [ /* one row per defect: { id, kind, tools, defect, class, trippedBy, about?, reread? } */ ],
+    cutList: [ /* one row per defect: { id, kind, tools, defect, class, trippedBy, about?, misreadings?, consider?, reread? } */ ],
   },
   readers: [{ personaId, model, provider, status: "ok" | "error", error?, file }],
   skipped: [{ personaId, model, provider, reason }],   // readers with no key

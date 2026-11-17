@@ -40,7 +40,9 @@ export function renderVerdictMd(result) {
     const who = row.trippedBy.length ? row.trippedBy.map((t) => `${t.personaId} × ${t.model}`).join("; ") : "measurement";
     const ev = row.trippedBy.length ? row.trippedBy.map((t) => `"${clip(esc(t.evidence))}"`).join("; ") : "see token-weight.md";
     const rr = row.reread && typeof row.reread === "object" ? ` Re-read: ${row.reread.ambiguous ? "ambiguous" : "unambiguous"} — ${esc(row.reread.why)}` : row.reread ? ` Re-read: ${row.reread}.` : "";
-    L.push(`| ${row.class} | ${esc(row.tools.join(", "))} | ${esc(row.defect)}${rr} | ${esc(who)} | ${ev} |`);
+    const mr = row.misreadings?.length ? ` Misread by: ${row.misreadings.map((m) => `${m.personaId} × ${m.model} (${m.kind}: ${clip(esc(m.evidence), 120)})`).join("; ")}.` : "";
+    const cls = row.consider ? `${row.class} (consider)` : row.class;
+    L.push(`| ${cls} | ${esc(row.tools.join(", "))} | ${esc(row.defect)}${mr}${rr} | ${esc(who)} | ${ev} |`);
   }
   L.push("", "## Honesty caveat", "");
   for (const h of result.honesty) L.push(`> ${h}`, ">");

@@ -106,11 +106,13 @@ test("decide: no rows, cross-model, two readers, graded -> pass", () => {
   assert.deepEqual(g.counts, { structural: 0, mustFix: 0, readerError: 0, informational: 0 });
 });
 
+const MISREADING = [{ reader: "r2", personaId: "p2", model: "openai-m", kind: "routing", evidence: "q1: picked beta, expected alpha" }];
+
 test("decide: classes, re-read outcomes, token-weight rows and sort order", () => {
   const clusters = new Map([
     cluster("teachback:alpha", "teachback", ["r1", "r2"]),
-    cluster("confusion:two", "confusion", ["r1", "r2"]),
-    cluster("confusion:amb", "confusion", ["r1"]),
+    cluster("confusion:two", "confusion", ["r1", "r2"], { misreadings: MISREADING }),
+    cluster("confusion:amb", "confusion", ["r1"], { misreadings: MISREADING }),
     cluster("confusion:misread", "confusion", ["r2"]),
     cluster("length:alpha", "length", ["r1"], { informational: true }),
   ]);
@@ -134,8 +136,37 @@ test("decide: classes, re-read outcomes, token-weight rows and sort order", () =
   assert.equal("informational" in g.cutList.find((r) => r.id === "length:alpha"), false);
 });
 
+test("decide: confusion-only clusters are informational however many readers raised them", () => {
+  const clusters = new Map([
+    cluster("confusion:two", "confusion", ["r1", "r2"]),
+    cluster("confusion:empty", "confusion", ["r1", "r2"], { misreadings: [] }),
+    cluster("confusion:amb", "confusion", ["r1"]),
+    cluster("confusion:clear", "confusion", ["r1"]),
+  ]);
+  const rereads = new Map([["confusion:amb", { ambiguous: true, why: "two readings" }], ["confusion:clear", { ambiguous: false, why: "clear" }]]);
+  const g = decide({ clusters, readers: two, rereads, teachBackGraded: true, tokenWeight: null });
+  const by = Object.fromEntries(g.cutList.map((r) => [r.id, r]));
+  assert.equal(by["confusion:two"].class, "informational");
+  assert.equal(by["confusion:empty"].class, "informational");
+  assert.equal(by["confusion:amb"].class, "informational");
+  assert.equal(by["confusion:amb"].consider, true);
+  assert.equal("consider" in by["confusion:two"], false);
+  assert.equal(by["confusion:clear"].class, "reader-error", "the reader-error rule still applies first");
+  assert.equal(g.verdict, "pass");
+});
+
+test("buildClusters: a confusion cluster carries the misreadings of its tool, from any reader", () => {
+  const confused = { ...clean, confusion: [{ tool: "alpha", about: "description", issue: "unclear", kind: "ambiguous" }] };
+  const misrouted = { ...clean, routing: [{ requestId: "q1", tool: "beta" }, { requestId: "q2", tool: "beta" }, { requestId: "q3", tool: NO_TOOL }] };
+  const clusters = buildClusters({ readers: [reader("p1", "anthropic", confused), reader("p2", "openai", misrouted)], requests, truth, teachBackGrades: null, lengthBenchmark: null });
+  const m = clusters.get("confusion:alpha:description").misreadings;
+  assert.equal(m.length, 1);
+  assert.equal(m[0].personaId, "p2");
+  assert.match(m[0].evidence, /q1: picked beta, expected alpha/);
+});
+
 test("decide: must-fix rows give conditional; no judge marks single-reader rows unverified", () => {
-  const clusters = new Map([cluster("confusion:one", "confusion", ["r1"]), cluster("confusion:two", "confusion", ["r1", "r2"])]);
+  const clusters = new Map([cluster("confusion:one", "confusion", ["r1"]), cluster("confusion:two", "confusion", ["r1", "r2"], { misreadings: MISREADING })]);
   const g = decide({ clusters, readers: two, rereads: null, teachBackGraded: false, tokenWeight: null });
   assert.equal(g.verdict, "conditional");
   const one = g.cutList.find((r) => r.id === "confusion:one");
