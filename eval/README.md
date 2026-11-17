@@ -35,14 +35,19 @@ Either route works, and the workflow picks one automatically:
 
 | Route | Set this | How it is used |
 |---|---|---|
-| Secret store step (optional) | Your CI secret store's token, if your workflow resolves keys from one | A step in `eval-live-panel.yml` loads the provider keys from your secret store and exports them for the run step |
-| Plain repository secrets | `ANTHROPIC_API_KEY` and/or `OPENAI_API_KEY` | The secret-store step is skipped entirely and the run step uses these directly |
+| Secret store (optional) | Your CI secret store's service token, as a repository secret | The **load-provider-keys step** resolves `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` from your secret store and exports them to the job |
+| Plain repository secrets | `ANTHROPIC_API_KEY` and/or `OPENAI_API_KEY` | The run step reads these when the secret store did not supply a key |
 
-The workflow prints which route it took. Plain repository secrets are the
-fallback, so a fork that has no secret store configured can still run the eval
-with nothing but a provider key. Provide the provider API keys via your CI
-secret store or as plain repository secrets. If both are present, the secret
-store wins.
+Before either, a **resolve-credential-route step** checks whether the secret
+store's token is set and prints which route the run is taking. With no token,
+the load-provider-keys step is skipped entirely and only the plain repository
+secrets are used, so a fork with no secret store can still run the eval with
+nothing but a provider key.
+
+**If both are set, the secret store wins.** The run step keeps any key the
+secret-store step already exported and falls back to the plain repository
+secret only for a key that is still empty. The decision is per key: a key the
+secret store did not resolve can still come from a plain repository secret.
 
 A provider with no key on either route is skipped and reported, not failed. If
 **no** provider has a key the run is refused (exit 3) and the job fails — a

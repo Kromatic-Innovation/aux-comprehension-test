@@ -49,6 +49,15 @@ will. 0.1.0 publishes from a reviewed `v0.1.0` tag.
 
 Running from a git checkout instead? Run `npm ci` in it first.
 
+### Runtime dependency
+
+The one runtime dependency is [panelist](https://www.npmjs.com/package/panelist),
+which supplies the persona registry and the `spawn` prompt the readers run
+through. It is **pre-1.0** and comes from the same organisation as this
+package, so the two move together. The supported range is `^0.4.1` (from
+`package.json`), which npm reads as `>=0.4.1 <0.5.0`: a panelist `0.5.0`
+is a breaking change until this package widens the range.
+
 ## First run (no key, no spend)
 
 Ask for the estimate instead of the run. `--estimate-only` reads your real
@@ -234,6 +243,40 @@ provider whose key is missing is **skipped and reported**, not treated as a
 failure. Prefix a model id with `xai:` or `google:` (or `anthropic:` /
 `openai:`) when the provider is not obvious from the id.
 
+## Network and data sent
+
+A live run contacts only the providers its readers and judge belong to, and
+only these hosts:
+
+| Provider | Host | Key |
+|---|---|---|
+| Anthropic | `api.anthropic.com` | `ANTHROPIC_API_KEY` |
+| OpenAI | `api.openai.com` | `OPENAI_API_KEY` |
+| xAI | `api.x.ai` | `XAI_API_KEY` |
+| Google | `generativelanguage.googleapis.com` | `GEMINI_API_KEY` / `GOOGLE_API_KEY` |
+
+Nothing else is called: no telemetry, no update check, no price lookup (prices
+come from the bundled `data/prices.json` or your `--prices` file). A provider
+with no key set is never contacted.
+
+What is sent to those providers:
+
+- **Every reader** receives its reader prompt, which contains the **full
+  `tools/list` payload** you pass with `--tools` and the `id` and `request`
+  text of every routing request. It does not receive your ground truth or the
+  expected tools.
+- **The judge** (only with `--judge`) receives your **ground-truth file**
+  alongside each reader's teach-back, and the payload alongside any complaint
+  that exactly one reader raised.
+
+Treat the payload and the ground truth as shared with each provider you name,
+under that provider's own data terms.
+
+**`--estimate-only` and `npm test` contact no provider.** `--estimate-only`
+builds and prices the prompts and returns before any model is called, with or
+without keys in the environment. `npm test` replaces `fetch` with one that
+fails the test making the call, and carries no keys.
+
 ## Library use
 
 ```js
@@ -247,6 +290,77 @@ const result = await run(
 
 An injected client has panelist's adapter shape:
 `{ model, complete({ prompt, maxTokens }) -> { ok, text, model, usage? } }`.
+
+### `run()` options
+
+`run(opts, deps?)` reads exactly these fields. Each CLI flag maps to one of
+them; `run` reads no files and parses no paths itself.
+
+| Field | Type | Required | Default | CLI flag |
+|---|---|---|---|---|
+| `tools` | parsed JSON: a bare array, `{ tools }` or `{ result: { tools } }` | yes | | `--tools` |
+| `truth` | string: the ground-truth markdown | yes | | `--truth` |
+| `requests` | parsed JSON: `[{ id, request, expected, nearMiss? }]` | yes | | `--requests` |
+| `models` | `string[]` of model specs (`xai:`, `google:` etc. prefixes allowed) | yes | | `--models` |
+| `maxUsd` | positive number: the spend ceiling | yes | none, ever | `--max-usd` |
+| `judge` | model spec string | no | no judge, so `pass` is withheld | `--judge` |
+| `personas` | `string[]` of reader persona ids | no | all bundled personas | `--personas` |
+| `maxReaders` | number: cap on panel size | no | no cap | `--readers` |
+| `maxTokens` | number: reader output cap | no | `8192` | `--max-tokens` |
+| `judgeMaxTokens` | number: judge output cap | no | `4096` | none |
+| `prices` | flat map `{ <id>: { input, output, above? } }`, USD per million tokens (no `models` wrapper) | no | the bundled `data/prices.json` table | `--prices` (merged over the bundled table) |
+| `lengthBenchmark` | `{ materiallyLonger, correlatesWithLowerSelection, source }` | no | `null` | `--length-benchmark` |
+| `out` | directory path to write outputs into | no | write nothing | `--out` |
+| `estimateOnly` | boolean | no | `false` | `--estimate-only` |
+| `env` | object to read provider keys from | no | `process.env` | none |
+
+`deps.clientFor(spec, env)` replaces the built-in provider clients. It
+receives a parsed spec `{ provider, model }` and returns `{ client }` or
+`{ skipped: "<reason>" }`.
+
+`prices`, when you pass it to `run` directly, **replaces** the bundled table
+rather than merging with it, and is the flat model map, not the
+`{ "models": ... }` file shape `--prices` reads. The CLI builds it with the
+exported `loadPrices(file)` (an unstable internal), which merges a file over
+the bundled table.
+
+### `run()` result
+
+A completed run resolves to the object written to `verdict.json`:
+
+```js
+{
+  status: "completed",
+  tool: "aux-comprehension-test",
+  version: "0.1.0",
+  grade: {
+    verdict: "pass" | "conditional" | "fail",
+    crossModel: true,                 // readers came from two or more providers
+    providers: ["anthropic", "openai"],
+    withheldPass: [],                 // why not pass; empty when verdict is "pass"
+    counts: { structural, mustFix, readerError, informational },
+    cutList: [ /* one row per defect: { id, kind, tools, defect, class, trippedBy, about?, reread? } */ ],
+  },
+  readers: [{ personaId, model, provider, status: "ok" | "error", error?, file }],
+  skipped: [{ personaId, model, provider, reason }],   // readers with no key
+  judge: { model, skipped, errors },
+  lengthBenchmark,                    // the option, echoed, or null
+  cost: { maxUsd, estimate: { usd, calls }, actual: { usd, approximate, calls } },
+  tokenWeight: { label, method, total: { bytes, tokens }, flags },
+  honesty: [ /* panelist's usage header, then HOST_CAVEAT */ ],
+}
+```
+
+`cutList[].class` is `structural`, `must-fix`, `reader-error` or
+`informational`, in that order. Each `readers[].file` is the path, relative to
+`out`, of that reader's verbatim answer.
+
+With `estimateOnly: true`, `run` resolves instead to
+`{ status: "estimate", estimate, skipped, judge: { model, skipped },
+priced: { readers, judge }, runnable: { readers, judge } }` and writes nothing.
+`run` throws a `RunError` (below) for bad inputs or a refused run. A reader
+whose call failed does not throw: it appears in `readers` with
+`status: "error"`.
 
 ### Stable surface
 
@@ -285,6 +399,13 @@ manual eval; see [`eval/README.md`](eval/README.md).
 Maintained by Kromatic. For bugs and features, open an issue on this
 repository. For anything security-sensitive, do **not** open a public issue —
 email **security@kromatic.com** instead (see [SECURITY.md](SECURITY.md)).
+
+Maintenance is **best effort, with no SLA**. We aim to reply to issues and
+pull requests within about two weeks, but there is no guaranteed response
+time; security reports follow the shorter timeline in SECURITY.md.
+
+The code is Apache-2.0: **fork it freely**, patch it for your own needs, and
+publish your fork under its own name. You do not need to wait on us.
 
 ## License
 

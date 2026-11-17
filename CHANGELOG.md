@@ -39,6 +39,11 @@ First version.
 - README: a cost-and-keys note above Install, both install commands, a no-key
   first run, and the stable library surface (every other root export is an
   unstable internal).
+- Docs: the hosts a live run contacts and the data sent to them (README and
+  `SECURITY.md`), every `run()` option and the shape of its result, the
+  `panelist` coupling and its supported range, a best-effort maintenance
+  statement, a fuller `CONTRIBUTING.md`, and which credential route wins in
+  the live eval.
 
 ### Changed
 
