@@ -24,7 +24,7 @@ Usage:
     --models <m1,m2,...> --max-usd N --out <dir> [options]
 
 Required:
-  --tools <file>        MCP tools/list payload (bare array, {tools}, or JSON-RPC {result:{tools}})
+  --tools <file>        MCP tools/list payload (bare array, {tools}, JSON-RPC {result:{tools}}, or an initialize + tools/list capture)
   --truth <file>        ground truth: one "## <tool_name>" section per tool (intended meaning)
   --requests <file>     routing requests: [{id, request, expected, nearMiss?, also_acceptable?}]
   --models <list>       comma-separated model ids; prefix xai:/google: (or anthropic:/openai:) when ambiguous
@@ -32,6 +32,8 @@ Required:
   --out <dir>           output directory (unless --estimate-only)
 
 Options:
+  --instructions <file> the server's initialize "instructions" (text or markdown), shown to readers before
+                        the tools. Also read from a --tools capture that carries them; this file wins
   --judge <model>       judge for teach-back drift and single-reader re-reads; without one, pass is withheld
   --personas <list>     reader personas (default: all bundled)
   --readers <N>         cap the number of readers
@@ -55,6 +57,7 @@ const OPTIONS = {
   requests: { type: "string" },
   models: { type: "string" },
   judge: { type: "string" },
+  instructions: { type: "string" },
   personas: { type: "string" },
   readers: { type: "string" },
   "max-usd": { type: "string" },
@@ -111,6 +114,7 @@ export async function main(argv, { env = process.env, stdout = process.stdout, s
       tools: JSON.parse(readFileSync(v.tools, "utf8")),
       truth: readFileSync(v.truth, "utf8"),
       requests: JSON.parse(readFileSync(v.requests, "utf8")),
+      instructions: v.instructions ? readFileSync(v.instructions, "utf8") : undefined,
       models: list(v.models),
       judge: v.judge,
       personas: list(v.personas),

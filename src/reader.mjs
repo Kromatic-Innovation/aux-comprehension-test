@@ -12,6 +12,11 @@ import { readAsset, readJsonAsset } from "./assets.mjs";
 import { readerRequests, NO_TOOL } from "./inputs.mjs";
 
 export const READER_INSTRUCTION = readAsset("prompts/reader-instruction.md").trim();
+/** Appended to the reader instruction only when the server sent instructions. */
+export const READER_INSTRUCTION_SERVER = readAsset("prompts/reader-instruction-server.md").trim();
+
+/** The instruction a reader gets for this payload. */
+export const readerInstruction = (payload) => (payload.instructions ? `${READER_INSTRUCTION}\n\n${READER_INSTRUCTION_SERVER}` : READER_INSTRUCTION);
 
 export const RESPONSE_SCHEMA = {
   teachBack: [{ tool: "<tool name>", meaning: "<what it does, when to use it, what it returns, what it costs or changes>" }],
@@ -69,9 +74,17 @@ export function buildPanel({ personaIds = DEFAULT_PERSONA_IDS, models, maxReader
   return maxReaders ? panel.slice(0, maxReaders) : panel;
 }
 
-/** The artifact a reader sees: the payload verbatim plus the reader view of the requests. */
+/**
+ * The artifact a reader sees: the server instructions (when given) under
+ * `server_instructions`, before the tools, as a host puts them in context;
+ * the payload verbatim; and the reader view of the requests.
+ */
 export function buildReaderArtifact(payload, requests) {
-  return JSON.stringify({ tools: payload.tools, requests: readerRequests(requests) }, null, 1);
+  return JSON.stringify(
+    { ...(payload.instructions ? { server_instructions: payload.instructions } : {}), tools: payload.tools, requests: readerRequests(requests) },
+    null,
+    1,
+  );
 }
 
 /** The exact prompt spawn will send, for cost estimation and the sentinel test. */
@@ -82,7 +95,7 @@ export function renderReaderPrompt({ personaId, payload, requests }) {
     persona,
     mode: "vote",
     artifact: buildReaderArtifact(payload, requests),
-    instruction: READER_INSTRUCTION,
+    instruction: readerInstruction(payload),
     responseSchema: RESPONSE_SCHEMA,
   });
 }
@@ -135,7 +148,7 @@ export async function runReader({ reader, client, payload, requests, maxTokens }
       {
         mode: "vote",
         artifact: buildReaderArtifact(payload, requests),
-        instruction: READER_INSTRUCTION,
+        instruction: readerInstruction(payload),
         responseSchema: RESPONSE_SCHEMA,
       },
       { client: watched, maxTokens },
