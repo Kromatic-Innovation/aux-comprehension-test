@@ -2,8 +2,9 @@
 // payload, the ground-truth file, and the routing requests.
 //
 // The reader-facing view of the requests (readerRequests) carries ONLY the id
-// and the request text. Expected tools, near-miss partners and any other
-// author field stay on the grading side; the sentinel test pins this.
+// and the request text. Expected tools, near-miss partners, also_acceptable
+// tools and any other author field stay on the grading side; the sentinel
+// test pins this.
 
 export const NO_TOOL = "none";
 
@@ -79,8 +80,10 @@ export function checkTruthCoverage(truth, payload) {
 }
 
 /**
- * Validate routing requests: `[{ id, request, expected, nearMiss? }]` or
- * `{ requests: [...] }`. `expected` is a tool name or "none".
+ * Validate routing requests: `[{ id, request, expected, nearMiss?, also_acceptable? }]`
+ * or `{ requests: [...] }`. `expected` is a tool name or "none".
+ * `also_acceptable` lists other picks the author counts as correct: each a
+ * tool name in the payload or "none".
  */
 export function normalizeRequests(raw, payload) {
   const list = Array.isArray(raw) ? raw : raw && Array.isArray(raw.requests) ? raw.requests : null;
@@ -97,6 +100,14 @@ export function normalizeRequests(raw, payload) {
     }
     if (r.nearMiss != null && !names.has(r.nearMiss)) {
       throw new Error(`requests: ${r.id} names nearMiss ${JSON.stringify(r.nearMiss)}, which is not a tool in the payload`);
+    }
+    if (r.also_acceptable !== undefined) {
+      if (!Array.isArray(r.also_acceptable)) throw new Error(`requests: ${r.id} also_acceptable must be an array of tool names (or "none")`);
+      for (const a of r.also_acceptable) {
+        if (a !== NO_TOOL && !names.has(a)) {
+          throw new Error(`requests: ${r.id} names also_acceptable ${JSON.stringify(a)}, which is not a tool in the payload (or "none")`);
+        }
+      }
     }
   }
   return list;

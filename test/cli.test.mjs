@@ -277,3 +277,15 @@ test("package.json carries the repository field npm provenance requires", () => 
     assert.ok(pkg.files.includes(entry), `files is missing ${entry}`);
   }
 });
+
+test("an also_acceptable entry outside the payload exits 64", async () => {
+  const { dir, base, out } = setup();
+  const reqs = JSON.parse(readFileSync(join(FIXTURES, "mini/requests.json"), "utf8")).map((r) => ({ ...r, also_acceptable: ["no_such_tool"] }));
+  const path = join(dir, "requests.json");
+  writeFileSync(path, JSON.stringify(reqs));
+  const args = base.map((a) => (a.endsWith("mini/requests.json") ? path : a));
+  const err = sink();
+  assert.equal(await main([...args, "--max-usd", "1", "--out", out], { env: {}, stdout: sink(), stderr: err, deps: deps() }), EXIT.usage);
+  assert.match(err.text, /also_acceptable "no_such_tool"/);
+  assert.equal(existsSync(out), false);
+});

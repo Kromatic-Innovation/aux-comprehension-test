@@ -70,6 +70,10 @@ First version.
   readers raised it, keeps the readers' evidence, and is flagged `consider`
   when the judge's re-read finds the copy ambiguous. It never moves the
   verdict.
+- Requests may carry `also_acceptable: string[]`: other tools (or `"none"`)
+  the author counts as a correct pick. Such a pick yields no routing row and
+  no near-miss row. An entry that is not a payload tool is a usage error, and
+  readers never see the field.
 
 ### Changed
 

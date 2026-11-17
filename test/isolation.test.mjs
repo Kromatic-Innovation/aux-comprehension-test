@@ -20,7 +20,7 @@ function plantedInputs() {
   const truth = fixture("mini/truth.md")
     .replace(/^(Predicts|Forecasts|Permanently)/gm, `${SENTINEL} $1`)
     .replace(/- Misreading: /g, `- Misreading: ${SENTINEL} `);
-  const requests = fixtureJson("mini/requests.json").map((r) => ({ ...r, rationale: `${REQ_SENTINEL} because ${r.expected}` }));
+  const requests = fixtureJson("mini/requests.json").map((r) => ({ ...r, rationale: `${REQ_SENTINEL} because ${r.expected}`, also_acceptable: ["none"] }));
   return { truth, requests };
 }
 
@@ -39,6 +39,7 @@ test("sentinel: no ground-truth string appears in any rendered reader prompt", a
     assert.ok(!prompt.includes(REQ_SENTINEL), `${personaId}: an author-only request field leaked`);
     assert.ok(!prompt.includes("Misreading"), `${personaId}: feared misreadings leaked`);
     assert.ok(!/"expected"|"nearMiss"/.test(prompt), `${personaId}: expected tools leaked`);
+    assert.ok(!/also_acceptable/.test(prompt), `${personaId}: also_acceptable tools leaked`);
     assert.ok(prompt.includes("estimate_run_cost"), "the payload itself is in the prompt");
   }
   // Negative control: the planted truth really did reach the run — the judge,
@@ -57,7 +58,7 @@ test("no reader prompt contains another reader's output", async () => {
 });
 
 test("the reader view of requests carries only id and request text", () => {
-  const view = readerRequests([{ id: "a", request: "r", expected: "t", nearMiss: "u", rationale: "x" }]);
+  const view = readerRequests([{ id: "a", request: "r", expected: "t", nearMiss: "u", also_acceptable: ["v"], rationale: "x" }]);
   assert.deepEqual(view, [{ id: "a", request: "r" }]);
 });
 

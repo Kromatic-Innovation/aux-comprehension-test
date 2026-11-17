@@ -4,7 +4,7 @@
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { runMini, miniReader } from "./_mini.mjs";
-import { scriptedJudge, resetRegistry } from "./_mock.mjs";
+import { scriptedJudge, resetRegistry, fixtureJson } from "./_mock.mjs";
 import { isLengthOnly } from "../src/grade.mjs";
 
 beforeEach(resetRegistry);
@@ -185,4 +185,33 @@ test("every cut-list row names tool, defect, persona x model and evidence; no sc
   }
   const json = JSON.stringify(res.grade);
   assert.ok(!/"(score|passRate|average|mean)"/.test(json), "no averaged score or pass-rate");
+});
+
+// ── also_acceptable ──────────────────────────────────────────────────────────────────
+
+const withAlso = (also) => fixtureJson("mini/requests.json").map((r) => (r.id === "q1" ? { ...r, also_acceptable: also } : r));
+
+test("a pick in also_acceptable produces no routing row, not even a near-miss", async () => {
+  const pick = { q1: "forecast_probability" }; // q1's nearMiss, listed as acceptable
+  const res = await runMini({ requests: withAlso(["forecast_probability"]), script: miniReader({ routing: { "small-context-host": pick, "cautious-agent": pick } }) });
+  assert.equal(res.grade.cutList.filter((r) => r.kind === "routing").length, 0);
+  assert.equal(res.grade.verdict, "pass");
+});
+
+test("a pick outside both expected and also_acceptable still produces a routing row", async () => {
+  const pick = { q1: "delete_saved_report" };
+  const res = await runMini({ requests: withAlso(["forecast_probability"]), script: miniReader({ routing: { "small-context-host": pick, "cautious-agent": pick } }) });
+  const row = res.grade.cutList.find((r) => r.id === "routing:q1");
+  assert.ok(row);
+  assert.equal(row.class, "must-fix");
+});
+
+test("also_acceptable may name none", async () => {
+  const pick = { q1: "none" };
+  const res = await runMini({ requests: withAlso(["none"]), script: miniReader({ routing: { "small-context-host": pick, "cautious-agent": pick } }) });
+  assert.equal(res.grade.cutList.filter((r) => r.kind === "routing").length, 0);
+});
+
+test("an also_acceptable entry that is not a payload tool is a usage error", async () => {
+  await assert.rejects(runMini({ requests: withAlso(["no_such_tool"]) }), (err) => err.code === "USAGE" && /also_acceptable "no_such_tool"/.test(err.message));
 });

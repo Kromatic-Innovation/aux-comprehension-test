@@ -34,3 +34,10 @@ test("requests: expected must be a payload tool or none; ids unique", () => {
   assert.throws(() => normalizeRequests([{ id: "1", request: "r", expected: "a" }, { id: "1", request: "s", expected: "b" }], P), /duplicate/);
   assert.throws(() => normalizeRequests([], P), /non-empty/);
 });
+
+test("requests: also_acceptable entries must be payload tools or none", () => {
+  assert.equal(normalizeRequests([{ id: "1", request: "r", expected: "a", also_acceptable: ["b", "none"] }], P).length, 1);
+  assert.equal(normalizeRequests([{ id: "1", request: "r", expected: "a", also_acceptable: [] }], P).length, 1);
+  assert.throws(() => normalizeRequests([{ id: "1", request: "r", expected: "a", also_acceptable: ["zzz"] }], P), /also_acceptable "zzz", which is not a tool/);
+  assert.throws(() => normalizeRequests([{ id: "1", request: "r", expected: "a", also_acceptable: "b" }], P), /must be an array/);
+});
