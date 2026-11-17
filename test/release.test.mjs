@@ -9,10 +9,11 @@ import { readFileSync } from "node:fs";
 
 const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), "utf8");
 
-test("the CHANGELOG's first section is this version, unreleased", () => {
+test("the CHANGELOG's first section is this version, unreleased or dated", () => {
   const { version } = JSON.parse(read("package.json"));
   const first = read("CHANGELOG.md").split("\n").find((l) => l.startsWith("## "));
-  assert.equal(first, `## [${version}] - unreleased`);
+  const esc = version.replace(/[.]/g, "\\.");
+  assert.match(first, new RegExp(`^## \\[${esc}\\] - (unreleased|\\d{4}-\\d{2}-\\d{2})$`));
 });
 
 test("release.yml's section-lift step extracts the whole grouped section", () => {

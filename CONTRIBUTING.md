@@ -13,7 +13,7 @@ Thanks for your interest.
 
 ## Setup
 
-Node 20 is the floor (`engines.node` is `>=20`, and CI runs on Node 20).
+Node 20 is the floor (`engines.node` is `>=20`, and CI runs on Node 20 and 22).
 Install from the lockfile, not with `npm install`:
 
 ```bash
