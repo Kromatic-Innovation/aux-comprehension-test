@@ -26,7 +26,7 @@ npm test
 | Path | Contents |
 |---|---|
 | `bin/` | The CLI entrypoint (`aux-comprehension-test.mjs`) |
-| `src/` | The package. `index.mjs` is the root export; `run.mjs` is one run end to end; `cli.mjs` is the CLI as a function |
+| `src/` | The package. `index.mjs` is the root export (the stable surface); `internal.mjs` is the `./internal` subpath; `run.mjs` is one run end to end; `cli.mjs` is the CLI as a function |
 | `prompts/` | Reader and judge prompt text, as markdown |
 | `personas/` | The bundled reader personas, registered with panelist |
 | `data/prices.json` | The bundled price table and the pricing pages it was read from |
@@ -60,8 +60,9 @@ exports drift apart, and every stable export has a direct test there.
   `STABLE` list in that test, and the export, in the same PR.
 - Changing the behaviour of a stable export is a breaking change: note it
   under `### Changed` in the CHANGELOG.
-- Everything else re-exported from `src/index.mjs` is an unstable internal and
-  may change in any `0.x` release.
+- Everything else is exported from `src/internal.mjs` (the
+  `aux-comprehension-test/internal` subpath), is an unstable internal, and may
+  change in any `0.x` release. Do not add a non-stable name to `src/index.mjs`.
 
 By contributing you agree that your contributions are licensed under the
 Apache License 2.0.

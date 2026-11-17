@@ -12,7 +12,7 @@ export function renderVerdictMd(result) {
     `- readers answered: ${result.readers.filter((r) => r.status === "ok").length}; failed: ${result.readers.filter((r) => r.status === "error").length}; skipped: ${result.skipped.length}`,
     `- judge: ${result.judge.model ?? `none${result.judge.skipped ? ` (${result.judge.skipped})` : ""}`}`,
     `- rows: ${g.counts.structural} structural, ${g.counts.mustFix} must-fix, ${g.counts.readerError} reader-error, ${g.counts.informational} informational`,
-    `- spend: estimate ≤ $${result.cost.estimate.usd.toFixed(4)}, actual $${result.cost.actual.usd.toFixed(4)}${result.cost.actual.approximate ? " (partly approximate)" : ""}, ceiling $${result.cost.maxUsd}`,
+    `- spend: estimate ≤ $${result.cost.estimate.usd.toFixed(4)}, actual $${result.cost.actual.usd.toFixed(4)}${result.cost.actual.approximate ? " (partly approximate)" : ""}${result.cost.actual.retries ? ` including ${result.cost.actual.retries} retried attempt(s)` : ""}, ceiling $${result.cost.maxUsd}`,
     "",
   ];
   if (g.withheldPass.length) {

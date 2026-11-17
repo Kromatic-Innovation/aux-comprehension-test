@@ -80,7 +80,7 @@ SKIPPED reader small-context-host x claude-haiku-4-5: ANTHROPIC_API_KEY is not s
 SKIPPED reader cautious-agent x gpt-5: OPENAI_API_KEY is not set
 SKIPPED reader technical-term-searcher x claude-haiku-4-5: ANTHROPIC_API_KEY is not set
 SKIPPED reader literal-reader x gpt-5: OPENAI_API_KEY is not set
-estimated spend (upper bound): $0.2507 over 4 call(s)
+estimated spend (upper bound): $0.2605 over 4 call(s)
 priced: 4 reader(s), ceiling $1
 runnable now: 0 of 4 reader(s) have a key
 no model was called; nothing was spent.
@@ -211,8 +211,8 @@ or an explicit `provider:` prefix). A single-provider panel can never pass.
 
 `--max-usd` is required and has no default. Before any model is called, the
 CLI estimates an upper bound on spend (the exact prompt each call will send, at
-chars / 4 tokens, plus each call's full output cap) and refuses to start if the
-estimate is over the ceiling. A model with no known price also refuses the run:
+chars / 4 tokens, plus each call's full output cap and the input of its maximum
+retries) and refuses to start if the estimate is over the ceiling. A model with no known price also refuses the run:
 it is never priced at zero. The bundled table in `data/prices.json` covers
 current Anthropic models and OpenAI `gpt-5` (standard tier). Each provider's
 entry under that file's `sources` block records the pricing page the numbers
@@ -231,6 +231,15 @@ them. Pass `--prices <file>` for any other model:
 ```json
 { "models": { "gpt-5-mini": { "input": 0.25, "output": 2 } } }
 ```
+
+A provider call that gets a 429 or a 5xx is retried at most twice, waiting
+for the response's `Retry-After` when it has one (and giving up instead when
+that is over 60 s), otherwise 1 s and then 2 s. Any other error, including a
+timeout, is not retried. A call that still fails is reported on that reader and
+the run continues. Each retried attempt is counted in actual spend at its full
+input and no output, since the provider reports no usage for it, and the
+estimate counts that worst case (two retried attempts) for every call, so the
+estimate stays an upper bound when calls are retried.
 
 Prices are USD per million tokens. Check them against your provider before
 relying on an estimate. Actual usage is reported in `verdict.json` at the end.
@@ -321,8 +330,8 @@ receives a parsed spec `{ provider, model }` and returns `{ client }` or
 `prices`, when you pass it to `run` directly, **replaces** the bundled table
 rather than merging with it, and is the flat model map, not the
 `{ "models": ... }` file shape `--prices` reads. The CLI builds it with the
-exported `loadPrices(file)` (an unstable internal), which merges a file over
-the bundled table.
+`loadPrices(file)` from `aux-comprehension-test/internal` (an unstable
+internal), which merges a file over the bundled table.
 
 ### `run()` result
 
@@ -345,7 +354,7 @@ A completed run resolves to the object written to `verdict.json`:
   skipped: [{ personaId, model, provider, reason }],   // readers with no key
   judge: { model, skipped, errors },
   lengthBenchmark,                    // the option, echoed, or null
-  cost: { maxUsd, estimate: { usd, calls }, actual: { usd, approximate, calls } },
+  cost: { maxUsd, estimate: { usd, maxRetries, calls }, actual: { usd, approximate, retries, calls } },
   tokenWeight: { label, method, total: { bytes, tokens }, flags },
   honesty: [ /* panelist's usage header, then HOST_CAVEAT */ ],
 }
@@ -377,11 +386,12 @@ exports drift apart:
 | `main(argv, io?)` | The CLI as a function. Returns the exit code; writes nothing to the real stdio unless you let it |
 | `EXIT` | The exit-code map (`pass`, `conditional`, `fail`, `refused`, `usage`, `internal`) |
 
-**Every other name re-exported from the package root is an unstable
-internal.** The graders, prompt builders, persona registry, cost functions and
-provider clients are exported so the test suite and the workspace skill can
-reach them; they may change shape in any `0.x` release without a major bump.
-Depend on them only if you are willing to pin an exact version.
+The package root exports nothing else. **Everything under
+`aux-comprehension-test/internal` is an unstable internal**: the graders,
+prompt builders, persona registry, cost functions and provider clients. It is
+exported so the test suite can reach it; any of it may change shape in any
+`0.x` release without a major bump. Import from it only if you are willing to
+pin an exact version.
 
 ## Development
 

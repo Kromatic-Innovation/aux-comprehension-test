@@ -10,9 +10,17 @@
 //   { "input": 0.1, "output": 0.5, "above": { "tokens": 100000, "input": 0.5, "output": 2.5 } }
 // A call whose input tokens are over `above.tokens` is priced entirely at the
 // `above` rates, in the estimate and in actual-spend reporting alike.
+//
+// Retries: a provider call that gets a 429 or 5xx is retried up to
+// MAX_RETRIES times (clients.mjs). Each retried attempt is counted in actual
+// spend at its full input (chars / 4 of the prompt) and zero output, because
+// the provider reports no usage for a failed attempt. The estimate counts the
+// same worst case for every call (MAX_RETRIES retried attempts, then a full
+// reply), so it stays an upper bound when calls are retried.
 
 import { readFileSync } from "node:fs";
 import { readJsonAsset } from "./assets.mjs";
+import { MAX_RETRIES } from "./clients.mjs";
 
 const BUNDLED = readJsonAsset("data/prices.json");
 
@@ -65,9 +73,11 @@ export function usd({ inputTokens, outputTokens }, price) {
 
 /**
  * @param {Array<{model: string, prompt: string, maxTokens: number, purpose: string}>} calls
- * @returns {{ usd: number, calls: object[] }}
+ * @param {object} prices
+ * @param {{maxRetries?: number}} [opts]  retried attempts to allow per call (default MAX_RETRIES)
+ * @returns {{ usd: number, maxRetries: number, calls: object[] }}
  */
-export function estimate(calls, prices) {
+export function estimate(calls, prices, { maxRetries = MAX_RETRIES } = {}) {
   const unknown = [...new Set(calls.filter((c) => !validPrice(priceFor(c.model, prices))).map((c) => c.model))];
   if (unknown.length) {
     const err = new Error(
@@ -79,15 +89,19 @@ export function estimate(calls, prices) {
     throw err;
   }
   const rows = calls.map((c) => {
+    const price = priceFor(c.model, prices);
     const tokens = { inputTokens: approxTokens(c.prompt), outputTokens: c.maxTokens };
-    return { purpose: c.purpose, model: c.model, ...tokens, usd: usd(tokens, priceFor(c.model, prices)) };
+    const retryUsd = maxRetries * usd({ inputTokens: tokens.inputTokens, outputTokens: 0 }, price);
+    return { purpose: c.purpose, model: c.model, ...tokens, retries: maxRetries, usd: usd(tokens, price) + retryUsd };
   });
-  return { usd: rows.reduce((s, r) => s + r.usd, 0), calls: rows };
+  return { usd: rows.reduce((s, r) => s + r.usd, 0), maxRetries, calls: rows };
 }
 
 /**
  * Wrap a client so every call's usage is recorded. When a client reports no
- * usage, chars / 4 of the prompt and reply stand in, marked approximate.
+ * usage, chars / 4 of the prompt and reply stand in, marked approximate. A
+ * reply carrying `retries: n` (clients.mjs) also records n retried attempts,
+ * each at chars / 4 of the prompt in and nothing out, marked approximate.
  */
 export function meter(client, ledger, purpose) {
   return {
@@ -103,6 +117,10 @@ export function meter(client, ledger, purpose) {
         outputTokens: exact ? u.outputTokens : approxTokens(res?.text ?? ""),
         approximate: !exact,
       });
+      const retries = Number.isInteger(res?.retries) && res.retries > 0 ? res.retries : 0;
+      for (let i = 0; i < retries; i++) {
+        ledger.push({ purpose, model: client.model, inputTokens: approxTokens(args.prompt), outputTokens: 0, approximate: true, retry: true });
+      }
       return res;
     },
   };
@@ -116,5 +134,5 @@ export function actual(ledger, prices) {
     if (cost != null) total += cost;
     return { ...e, usd: cost };
   });
-  return { usd: total, approximate: ledger.some((e) => e.approximate), calls: rows };
+  return { usd: total, approximate: ledger.some((e) => e.approximate), retries: ledger.filter((e) => e.retry).length, calls: rows };
 }
