@@ -64,6 +64,12 @@ First version.
   records the provider's stop reason in `verdict.json` `judge.failures`; its
   rows read `unverified (judge failed: <reason>)`, and `unverified (no judge)`
   is kept for runs without `--judge`.
+- Must-fix needs a misreading: a confusion cluster is `must-fix` only when
+  some reader also misread that tool (a routing miss, or judge-confirmed
+  teach-back drift). A confusion-only cluster is `informational`, however many
+  readers raised it, keeps the readers' evidence, and is flagged `consider`
+  when the judge's re-read finds the copy ambiguous. It never moves the
+  verdict.
 
 ### Changed
 

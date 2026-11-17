@@ -4,15 +4,25 @@
 // defect, each persona × model that tripped it, and that reader's own words
 // as evidence.
 //
+// A *misreading* is evidence that a reader actually got a tool wrong: a
+// routing miss (on the expected tool, and on a tool wrongly picked), or
+// teach-back drift the judge confirmed against the ground truth. A confusion
+// report on its own is reported unease, not a misreading.
+//
 // Row classes:
 //   must-fix       tripped by two or more distinct readers, or by one reader
-//                  where the judge's re-read found the copy ambiguous.
+//                  where the judge's re-read found the copy ambiguous. A
+//                  confusion cluster qualifies only when its tool also has at
+//                  least one misreading (from any reader).
 //   reader-error   tripped by exactly one reader, copy unambiguous on re-read
 //                  (or not re-read: no judge, or the judge failed -- the row
 //                  says which). Not a must-fix.
 //   structural     a tool whose purpose no reader recovered. Yields `fail`.
-//   informational  length-only complaints and token-weight flags. Never
-//                  moves the verdict.
+//   informational  length-only complaints, token-weight flags, and
+//                  confusion-only clusters (no misreading of that tool),
+//                  however many readers raised them. Never moves the verdict.
+//                  A confusion-only row the judge's re-read found ambiguous
+//                  carries `consider: true`: worth a look, still not a gate.
 //
 // Verdict:
 //   fail         any structural row.
@@ -60,6 +70,13 @@ function add(clusters, key, base, trip) {
 export function buildClusters({ readers, requests, truth, teachBackGrades, lengthBenchmark }) {
   const clusters = new Map();
   const promoteLength = lengthPromoted(lengthBenchmark);
+  // tool -> misreadings of it, from any reader (see the header).
+  const misread = new Map();
+  const misreadOf = (tool, entry) => {
+    if (!tool || tool === NO_TOOL || !truth.tools[tool]) return;
+    if (!misread.has(tool)) misread.set(tool, []);
+    misread.get(tool).push(entry);
+  };
 
   for (const r of readers) {
     const who = { reader: readerKey(r), personaId: r.personaId, model: r.model, provider: r.provider };
@@ -71,6 +88,9 @@ export function buildClusters({ readers, requests, truth, teachBackGrades, lengt
       if (pick === req.expected) continue;
       const nearMissHit = req.nearMiss && pick === req.nearMiss;
       const tools = [req.expected === NO_TOOL ? null : req.expected, nearMissHit ? req.nearMiss : null].filter(Boolean);
+      const miss = { ...who, kind: "routing", evidence: `${req.id}: picked ${pick ?? "(nothing)"}, expected ${req.expected}` };
+      misreadOf(req.expected, miss);
+      misreadOf(pick, miss);
       add(
         clusters,
         `routing:${req.id}`,
@@ -96,12 +116,12 @@ export function buildClusters({ readers, requests, truth, teachBackGrades, lengt
         );
         continue;
       }
-      add(
-        clusters,
-        `confusion:${norm(c.tool)}:${norm(c.about)}`,
-        { kind: "confusion", tools: [c.tool], about: c.about, defect: `Confusing copy: ${c.tool} / ${c.about}.` },
-        { ...who, evidence: c.issue },
-      );
+      const key = `confusion:${norm(c.tool)}:${norm(c.about)}`;
+      add(clusters, key, { kind: "confusion", tools: [c.tool], about: c.about, defect: `Confusing copy: ${c.tool} / ${c.about}.` }, { ...who, evidence: c.issue });
+      // A benchmark-promoted length complaint is backed by outside evidence of
+      // lower selection, so a cluster holding one (from any reader, in any
+      // order) is not "confusion only".
+      if (isLengthOnly(c)) clusters.get(key).lengthPromoted = true;
     }
 
     // Teach-back: a missing explanation is mechanical; drift needs the judge.
@@ -114,6 +134,7 @@ export function buildClusters({ readers, requests, truth, teachBackGrades, lengt
       }
       const g = grades?.find((x) => x.tool === tool);
       if (g && g.recovered === false) {
+        misreadOf(tool, { ...who, kind: "teachback", evidence: g.drift || "judge: purpose not recovered" });
         add(
           clusters,
           `teachback:${tool}`,
@@ -122,6 +143,9 @@ export function buildClusters({ readers, requests, truth, teachBackGrades, lengt
         );
       }
     }
+  }
+  for (const c of clusters.values()) {
+    if (c.kind === "confusion") c.misreadings = misread.get(c.tools[0]) ?? [];
   }
   return clusters;
 }
@@ -155,18 +179,34 @@ export function decide({ clusters, readers, rereads, teachBackGraded, tokenWeigh
   const nReaders = readers.length;
   for (const c of clusters.values()) {
     const distinct = c.trippedBy.length;
+    // A confusion cluster with no misreading of its tool. Clusters built by
+    // hand without `misreadings` are confusion-only too.
+    const confusionOnly = c.kind === "confusion" && !c.lengthPromoted && !(c.misreadings?.length > 0);
     let cls;
     let reread = null;
+    let consider = false;
     if (c.informational) cls = "informational";
     else if (c.kind === "teachback" && nReaders >= 2 && distinct === nReaders) cls = "structural";
-    else if (distinct >= 2) cls = "must-fix";
+    else if (distinct >= 2) cls = confusionOnly ? "informational" : "must-fix";
     else {
       const rr = rereads?.get(c.id) ?? null;
       reread = rr ? { ambiguous: rr.ambiguous, why: rr.why } : unverified;
-      cls = rr && rr.ambiguous ? "must-fix" : "reader-error";
+      if (!(rr && rr.ambiguous)) cls = "reader-error";
+      else if (confusionOnly) {
+        cls = "informational";
+        consider = true;
+      } else cls = "must-fix";
     }
-    const { informational, ...rest } = c;
-    rows.push({ ...rest, class: cls, ...(reread ? { reread } : {}) });
+    const { informational, misreadings, lengthPromoted: _promoted, ...rest } = c;
+    const defect = confusionOnly && cls === "informational" ? `${c.defect} Confusion only: no reader misrouted or misexplained ${c.tools[0]}.` : c.defect;
+    rows.push({
+      ...rest,
+      defect,
+      class: cls,
+      ...(misreadings?.length ? { misreadings } : {}),
+      ...(consider ? { consider } : {}),
+      ...(reread ? { reread } : {}),
+    });
   }
   for (const f of tokenWeight?.flags ?? []) {
     rows.push({ id: `token-weight:${f.kind}:${f.tools.join(",")}`, kind: "token-weight", tools: f.tools, defect: f.detail, class: "informational", trippedBy: [] });

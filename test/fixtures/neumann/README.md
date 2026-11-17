@@ -36,6 +36,11 @@ grader turns those findings into the right cut-list and verdict; it says
 nothing about how a live model would read the copy. That is what the manual
 live eval (`eval/`) is for.
 
+In the 0.2.5 copy two readers flag the free-runs count, but none of them
+misroutes or misexplains the account tool, so the grader reports it as an
+informational confusion-only row; it does not hold the verdict off `pass`.
+The 0.2.10 copy no longer trips it at all.
+
 The repeated billing sub-schema is flagged as informational in **both**
 versions. The revision deliberately kept schema size, under the rule that
 length alone is not a defect, so an honest measurement still flags it. It

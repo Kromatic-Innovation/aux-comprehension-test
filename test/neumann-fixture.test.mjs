@@ -17,6 +17,10 @@
 //     reader on copy that is correct;
 //   - routing picks the tool for each request by its intent, from the names
 //     actually present.
+//
+// No reader misroutes or misexplains a tool in either copy, so the free-runs
+// ambiguity is a confusion-only row: informational, not must-fix. The
+// before/after difference is that the row is present before and gone after.
 
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
@@ -91,17 +95,21 @@ const rowsOf = (res, cls) => res.grade.cutList.filter((r) => r.class === cls);
 
 beforeEach(resetRegistry);
 
-test("before copy: non-pass, with a must-fix row for the free-runs count semantics", async () => {
+test("before copy: the free-runs count semantics is a confusion-only row, informational", async () => {
+  // Two readers report the ambiguity, but no reader misroutes or misexplains
+  // the account tool, so it is reported unease, not a misreading: the row is
+  // informational and does not hold the verdict off pass.
   const res = await runVersion("before");
   assert.equal(res.readers.length, 4, "three models and four personas give four readers");
   assert.equal(res.grade.crossModel, true);
-  assert.notEqual(res.grade.verdict, "pass");
-  assert.equal(res.grade.verdict, "conditional");
-  const mustFix = rowsOf(res, "must-fix");
-  const billing = mustFix.find((r) => r.id === "confusion:whoami:billing.anonymous_runs_remaining_today");
-  assert.ok(billing, `expected the free-runs semantics row; got ${mustFix.map((r) => r.id).join(", ")}`);
+  const billing = res.grade.cutList.find((r) => r.id === "confusion:whoami:billing.anonymous_runs_remaining_today");
+  assert.ok(billing, `expected the free-runs semantics row; got ${res.grade.cutList.map((r) => r.id).join(", ")}`);
+  assert.equal(billing.class, "informational");
+  assert.match(billing.defect, /Confusion only/);
   assert.deepEqual(billing.trippedBy.map((t) => t.personaId).sort(), ["cautious-agent", "literal-reader"]);
   assert.ok(billing.trippedBy.every((t) => t.evidence.length > 0), "every trip carries the reader's words");
+  assert.equal(res.grade.counts.mustFix, 0);
+  assert.equal(res.grade.verdict, "pass");
 });
 
 test("before copy: the schema-bloat token-weight flag is an informational row, not a defect", async () => {
@@ -109,10 +117,10 @@ test("before copy: the schema-bloat token-weight flag is an informational row, n
   const bloat = res.grade.cutList.find((r) => r.kind === "token-weight" && /BillingInfo/.test(r.defect));
   assert.ok(bloat, "the repeated billing sub-schema is flagged");
   assert.equal(bloat.class, "informational");
-  assert.equal(res.grade.counts.mustFix, 1, "only the semantics row is must-fix; bloat does not add one");
+  assert.equal(res.grade.counts.mustFix, 0, "bloat does not add a must-fix row");
 });
 
-test("after copy: the must-fix row clears and the verdict is pass", async () => {
+test("after copy: the free-runs row clears and the verdict is pass", async () => {
   const res = await runVersion("after");
   assert.equal(res.grade.verdict, "pass", JSON.stringify(res.grade.withheldPass));
   assert.equal(rowsOf(res, "must-fix").length, 0);

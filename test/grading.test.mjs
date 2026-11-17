@@ -48,17 +48,62 @@ test("a defect tripped by exactly one reader on unambiguous copy is a reader err
   assert.equal(res.grade.verdict, "pass", "a reader error does not block pass");
 });
 
-test("the same defect tripped by two readers is must-fix", async () => {
-  const res = await runMini({ script: miniReader({ confusion: { "small-context-host": [MISREAD], "cautious-agent": [MISREAD] } }) });
+// ── confusion only vs. a misreading ──────────────────────────────────────────────────
+
+const TWO_CONFUSED = { "small-context-host": [MISREAD], "cautious-agent": [MISREAD] };
+
+test("two readers, confusion only: the row is informational and the verdict stays pass", async () => {
+  const res = await runMini({ script: miniReader({ confusion: TWO_CONFUSED }) });
+  const row = res.grade.cutList.find((r) => r.kind === "confusion");
+  assert.equal(row.class, "informational");
+  assert.equal(row.trippedBy.length, 2, "the readers' evidence stays in the row");
+  assert.ok(row.trippedBy.every((t) => t.evidence.includes("destructiveHint")));
+  assert.match(row.defect, /Confusion only/);
+  assert.equal("misreadings" in row, false);
+  assert.equal(res.grade.counts.mustFix, 0);
+  assert.equal(res.grade.verdict, "pass");
+});
+
+test("two readers, with a misreading: one reader routing that tool wrongly makes it must-fix", async () => {
+  const res = await runMini({ script: miniReader({ confusion: TWO_CONFUSED, routing: { "literal-reader": { q3: "none" } } }) });
   const row = res.grade.cutList.find((r) => r.kind === "confusion");
   assert.equal(row.class, "must-fix");
+  assert.equal(row.misreadings.length, 1);
+  assert.equal(row.misreadings[0].personaId, "literal-reader");
+  assert.equal(row.misreadings[0].kind, "routing");
   assert.equal(res.grade.verdict, "conditional");
 });
 
-test("a single-reader defect the judge finds ambiguous on re-read is must-fix", async () => {
+test("judge-confirmed teach-back drift on the tool is a misreading too", async () => {
+  const res = await runMini({ script: miniReader({ confusion: TWO_CONFUSED, teachBack: { "literal-reader": { delete_saved_report: "Shows the weather." } } }) });
+  const row = res.grade.cutList.find((r) => r.kind === "confusion");
+  assert.equal(row.class, "must-fix");
+  assert.equal(row.misreadings[0].kind, "teachback");
+});
+
+test("a misreading of a different tool does not promote the confusion", async () => {
+  const res = await runMini({ script: miniReader({ confusion: TWO_CONFUSED, routing: { "literal-reader": { q4: "forecast_probability" } } }) });
+  const row = res.grade.cutList.find((r) => r.kind === "confusion");
+  assert.equal(row.class, "informational");
+});
+
+test("a single-reader confusion the judge finds ambiguous is informational, flagged consider", async () => {
   const id = "confusion:delete_saved_report:annotations.destructivehint";
   const res = await runMini({
     script: miniReader({ confusion: { "small-context-host": [MISREAD] } }),
+    judgeClient: scriptedJudge("claude-sonnet-4-6", { ambiguousIds: [id] }),
+  });
+  const row = res.grade.cutList.find((r) => r.id === id);
+  assert.equal(row.class, "informational");
+  assert.equal(row.consider, true);
+  assert.equal(row.reread.ambiguous, true);
+  assert.equal(res.grade.verdict, "pass", "consider never moves the verdict");
+});
+
+test("a single-reader defect the judge finds ambiguous, with a misreading, is must-fix", async () => {
+  const id = "confusion:delete_saved_report:annotations.destructivehint";
+  const res = await runMini({
+    script: miniReader({ confusion: { "small-context-host": [MISREAD] }, routing: { "small-context-host": { q3: "none" } } }),
     judgeClient: scriptedJudge("claude-sonnet-4-6", { ambiguousIds: [id] }),
   });
   const row = res.grade.cutList.find((r) => r.id === id);
@@ -133,7 +178,7 @@ test("a tool whose purpose no reader recovers is structural and fails the gate",
 });
 
 test("every cut-list row names tool, defect, persona x model and evidence; no score anywhere", async () => {
-  const res = await runMini({ script: miniReader({ confusion: { "small-context-host": [MISREAD], "cautious-agent": [MISREAD] } }) });
+  const res = await runMini({ script: miniReader({ confusion: TWO_CONFUSED, routing: { "literal-reader": { q3: "none" } } }) });
   for (const row of res.grade.cutList) {
     assert.ok(row.tools.length && row.defect && row.class);
     for (const t of row.trippedBy) assert.ok(t.personaId && t.model && t.evidence);
