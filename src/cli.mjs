@@ -26,7 +26,7 @@ Usage:
 Required:
   --tools <file>        MCP tools/list payload (bare array, {tools}, or JSON-RPC {result:{tools}})
   --truth <file>        ground truth: one "## <tool_name>" section per tool (intended meaning)
-  --requests <file>     routing requests: [{id, request, expected, nearMiss?}]
+  --requests <file>     routing requests: [{id, request, expected, nearMiss?, also_acceptable?}]
   --models <list>       comma-separated model ids; prefix xai:/google: (or anthropic:/openai:) when ambiguous
   --max-usd <N>         spend ceiling in USD; no default. Over-estimate refuses to start
   --out <dir>           output directory (unless --estimate-only)

@@ -82,10 +82,12 @@ export function buildClusters({ readers, requests, truth, teachBackGrades, lengt
     const who = { reader: readerKey(r), personaId: r.personaId, model: r.model, provider: r.provider };
     const { teachBack, routing, confusion } = r.response;
 
-    // Routing: graded mechanically against the expected tool.
+    // Routing: graded mechanically against the expected tool. A pick the
+    // author listed in also_acceptable is correct too: no row, no near-miss.
     for (const req of requests) {
       const pick = routing.find((x) => x.requestId === req.id)?.tool ?? null;
       if (pick === req.expected) continue;
+      if (pick != null && Array.isArray(req.also_acceptable) && req.also_acceptable.includes(pick)) continue;
       const nearMissHit = req.nearMiss && pick === req.nearMiss;
       const tools = [req.expected === NO_TOOL ? null : req.expected, nearMissHit ? req.nearMiss : null].filter(Boolean);
       const miss = { ...who, kind: "routing", evidence: `${req.id}: picked ${pick ?? "(nothing)"}, expected ${req.expected}` };

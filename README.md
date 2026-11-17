@@ -146,7 +146,25 @@ confuse.
 ]
 ```
 
-Readers see only each request's `id` and `request` text.
+When more than one tool is a correct answer, list the others in an optional
+`also_acceptable` array (tool names in the payload, or `"none"`). A pick in
+`also_acceptable` counts as correct: no routing row, and no near-miss row
+even when it is the `nearMiss` tool. Write it before any reader runs, like
+the rest of the ground truth. An entry that is not a tool in the payload (or
+`"none"`) is a usage error (exit `64`).
+
+```json
+{ "id": "q7", "request": "What's the P80 total cost?",
+  "expected": "scenario_analysis", "nearMiss": "estimate_run_cost",
+  "also_acceptable": ["full_distribution"] }
+```
+
+Here a reader who picks `full_distribution` is correct. A reader who picks
+`estimate_run_cost` trips the near-miss row, and any other pick trips a routing
+row.
+
+Readers see only each request's `id` and `request` text. They never see
+`expected`, `nearMiss` or `also_acceptable`.
 
 ### Outputs
 
@@ -173,8 +191,9 @@ codes: `64` means fix your command line or inputs, `70` means report a bug.
 
 ## How it grades
 
-- **Routing** is graded mechanically against the expected tool. A miss on a
-  near-miss pair is a defect on both tools in the pair.
+- **Routing** is graded mechanically against the expected tool, or any tool
+  in the request's `also_acceptable`. A miss on a near-miss pair is a defect
+  on both tools in the pair.
 - **Confusion reports** are grouped by tool and the field they are about.
 - **Teach-back drift** is graded by an optional judge model (`--judge`), which
   compares each explanation with your intended meaning without knowing which
