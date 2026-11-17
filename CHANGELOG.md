@@ -74,6 +74,11 @@ First version.
   the author counts as a correct pick. Such a pick yields no routing row and
   no near-miss row. An entry that is not a payload tool is a usage error, and
   readers never see the field.
+- `--instructions <file>` (and `instructions` in a `--tools` capture): the
+  server's `initialize` instructions are shown to readers in a labelled
+  section before the tools, an optional `## server-instructions` ground-truth
+  section is graded for teach-back, and token-weight reports them on their
+  own row.
 
 ### Changed
 

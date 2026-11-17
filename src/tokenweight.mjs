@@ -38,7 +38,8 @@ function collectDefs(schema, into) {
 export async function measureTokenWeight(payload, { countTokens } = {}) {
   const method = countTokens ? "provider token count" : "approximate (chars / 4)";
   const tok = async (text, b) => (countTokens ? countTokens(text) : approx(b));
-  const payloadJson = JSON.stringify(payload);
+  // The tools/list payload alone; server instructions get their own row.
+  const payloadJson = JSON.stringify({ tools: payload.tools });
   const totalBytes = bytes(payloadJson);
 
   const tools = [];
@@ -94,10 +95,14 @@ export async function measureTokenWeight(payload, { countTokens } = {}) {
     }
   }
 
+  const instructions =
+    typeof payload.instructions === "string" ? { bytes: bytes(payload.instructions), tokens: await tok(payload.instructions, bytes(payload.instructions)) } : null;
+
   return {
     label: "informational / benchmark input — never a verdict input on its own",
     method,
     total: { bytes: totalBytes, tokens: await tok(payloadJson, totalBytes) },
+    ...(instructions ? { instructions } : {}),
     tools,
     flags,
   };
@@ -112,10 +117,17 @@ export function renderTokenWeightMd(report) {
     `Token method: ${report.method}.`,
     "",
     `Whole payload: ${report.total.bytes} bytes, ~${report.total.tokens} tokens, ${report.tools.length} tools.`,
+    ...(report.instructions
+      ? ["", `Server instructions: ${report.instructions.bytes} bytes, ~${report.instructions.tokens} tokens, on their own row below and not in the payload total or shares.`]
+      : []),
     "",
     "| Tool | Bytes | ~Tokens | Share | Description (B / ~tok) | Input schema (B / ~tok) | Output schema (B / ~tok) |",
     "|---|---:|---:|---:|---:|---:|---:|",
   ];
+  if (report.instructions) {
+    const i = report.instructions;
+    lines.push(`| (server instructions) | ${i.bytes} | ${i.tokens} | — | ${i.bytes} / ${i.tokens} | — | — |`);
+  }
   for (const r of report.tools) {
     const p = (k) => `${r.parts[k].bytes} / ${r.parts[k].tokens}`;
     lines.push(

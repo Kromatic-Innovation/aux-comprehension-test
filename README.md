@@ -118,6 +118,19 @@ see the pre-run estimate without calling any model.
 **`--tools`**: the `tools/list` payload, as a bare array, `{ "tools": [...] }`, or
 a JSON-RPC response `{ "result": { "tools": [...] } }`.
 
+**`--instructions`** (optional): the server's `instructions` string, the
+other agent-facing copy an MCP server sends, returned by `initialize`. Many
+hosts put it in the model's context next to the tools, so copy that explains
+something once in the instructions and only refers to it in each tool should
+be tested with it. Pass a plain-text or markdown file. If `--tools` is a
+capture that carries instructions, they are used without the flag:
+`{ "tools": [...], "instructions": "..." }`,
+`{ "result": { "tools": [...], "instructions": "..." } }`, or a JSON-RPC array
+`[<initialize response>, <tools/list response>]`. The flag wins over a capture.
+Readers see the instructions under `server_instructions`, before the tools,
+and are asked to teach them back as `server-instructions`. Without
+instructions, nothing changes.
+
 **`--truth`**: your intended meaning for each tool, written **before** any reader
 runs. Ground truth written after you have seen a reader's answer is a
 rationalisation, and nothing downstream can tell the difference. One `##`
@@ -131,6 +144,11 @@ Use it before a large run; it does not check the model for mistakes.
 
 - Misreading: It forecasts the probability of an event.
 ```
+
+When you pass server instructions, you may add a `## server-instructions`
+section with their intended meaning. It is graded for teach-back like a tool.
+It is optional, and it is set aside on runs without instructions, so one truth
+file serves both.
 
 Readers never see this file. A sentinel test pins that.
 
@@ -171,7 +189,7 @@ Readers see only each request's `id` and `request` text. They never see
 | File | Contents |
 |---|---|
 | `readers/<persona>__<model>.json` | One reader's teach-back, routing picks and confusion list, verbatim |
-| `token-weight.md` | Bytes and approximate tokens for the whole payload and per tool (description, input schema, output schema). Informational |
+| `token-weight.md` | Bytes and approximate tokens for the whole payload and per tool (description, input schema, output schema), plus a `(server instructions)` row when instructions were given (not counted in the payload total). Informational |
 | `verdict.md` | The verdict, why it is not `pass` (if it is not), the cut-list, the actual spend |
 | `verdict.json` | The same, machine-readable |
 | `judge/<n>-<call>.txt` | Only when a judge call failed to parse: the judge's raw reply (first and last 2 KB), with the provider's stop reason (`max_tokens` means it was cut off) |
@@ -345,11 +363,12 @@ them; `run` reads no files and parses no paths itself.
 
 | Field | Type | Required | Default | CLI flag |
 |---|---|---|---|---|
-| `tools` | parsed JSON: a bare array, `{ tools }` or `{ result: { tools } }` | yes | | `--tools` |
+| `tools` | parsed JSON: a bare array, `{ tools }`, `{ result: { tools } }`, or a JSON-RPC capture `[<initialize response>, <tools/list response>]` | yes | | `--tools` |
 | `truth` | string: the ground-truth markdown | yes | | `--truth` |
-| `requests` | parsed JSON: `[{ id, request, expected, nearMiss? }]` | yes | | `--requests` |
+| `requests` | parsed JSON: `[{ id, request, expected, nearMiss?, also_acceptable? }]` | yes | | `--requests` |
 | `models` | `string[]` of model specs (`xai:`, `google:` etc. prefixes allowed) | yes | | `--models` |
 | `maxUsd` | positive number: the spend ceiling | yes | none, ever | `--max-usd` |
+| `instructions` | string: the server's `initialize` `instructions` | no | any `instructions` in the `tools` capture, else none | `--instructions` (file contents) |
 | `judge` | model spec string | no | no judge, so `pass` is withheld | `--judge` |
 | `personas` | `string[]` of reader persona ids | no | all bundled personas | `--personas` |
 | `maxReaders` | number: cap on panel size | no | no cap | `--readers` |
@@ -393,7 +412,7 @@ A completed run resolves to the object written to `verdict.json`:
   judge: { model, skipped, errors, failures: [{ purpose, reason, stopReason, file? }] },
   lengthBenchmark,                    // the option, echoed, or null
   cost: { maxUsd, estimate: { usd, maxRetries, calls }, actual: { usd, approximate, retries, calls } },
-  tokenWeight: { label, method, total: { bytes, tokens }, flags },
+  tokenWeight: { label, method, total: { bytes, tokens }, instructions?: { bytes, tokens }, flags },
   honesty: [ /* panelist's usage header, then HOST_CAVEAT */ ],
 }
 ```

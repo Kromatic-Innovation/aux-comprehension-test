@@ -8,7 +8,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getPersona, USAGE_HEADER } from "panelist";
-import { normalizePayload, parseTruth, checkTruthCoverage, normalizeRequests } from "./inputs.mjs";
+import { normalizePayload, parseTruth, checkTruthCoverage, normalizeRequests, gradedTruth } from "./inputs.mjs";
 import { registerReaderPersonas, buildPanel, parseModelSpec, renderReaderPrompt, runReader, DEFAULT_PERSONA_IDS } from "./reader.mjs";
 import { gradeTeachBack, reread, buildTeachBackPrompt, buildRereadPrompt, teachBackBatches } from "./judge.mjs";
 import { buildClusters, rereadCandidates, decide } from "./grade.mjs";
@@ -40,6 +40,7 @@ export const readerFileName = (r) => `${safe(r.personaId)}__${safe(r.model)}.jso
  *   @param {object} opts.requests     routing requests (parsed JSON)
  *   @param {string[]} opts.models     model specs
  *   @param {number} opts.maxUsd       REQUIRED spend ceiling
+ *   @param {string} [opts.instructions]  the server's `instructions` string (overrides any in the capture)
  *   @param {string} [opts.judge]      judge model spec
  *   @param {string[]} [opts.personas]
  *   @param {number} [opts.maxReaders]
@@ -78,9 +79,10 @@ export async function run(opts, deps = {}) {
     }
   };
 
-  const payload = asUsage(() => normalizePayload(opts.tools));
-  const truth = asUsage(() => parseTruth(opts.truth));
-  asUsage(() => checkTruthCoverage(truth, payload));
+  const payload = asUsage(() => normalizePayload(opts.tools, { instructions: opts.instructions }));
+  const parsedTruth = asUsage(() => parseTruth(opts.truth));
+  asUsage(() => checkTruthCoverage(parsedTruth, payload));
+  const truth = gradedTruth(parsedTruth, payload);
   const requests = asUsage(() => normalizeRequests(opts.requests, payload));
 
   registerReaderPersonas();
@@ -244,7 +246,13 @@ export async function run(opts, deps = {}) {
     },
     lengthBenchmark: opts.lengthBenchmark ?? null,
     cost: { maxUsd: opts.maxUsd, estimate: est, actual: actual(ledger, prices) },
-    tokenWeight: { label: tokenWeight.label, method: tokenWeight.method, total: tokenWeight.total, flags: tokenWeight.flags },
+    tokenWeight: {
+      label: tokenWeight.label,
+      method: tokenWeight.method,
+      total: tokenWeight.total,
+      ...(tokenWeight.instructions ? { instructions: tokenWeight.instructions } : {}),
+      flags: tokenWeight.flags,
+    },
     honesty: [USAGE_HEADER, HOST_CAVEAT],
   };
 

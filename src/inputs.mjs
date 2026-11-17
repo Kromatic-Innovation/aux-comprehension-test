@@ -9,23 +9,55 @@
 export const NO_TOOL = "none";
 
 /**
- * Accept a bare tools array, `{ tools: [...] }`, or a JSON-RPC response
- * `{ result: { tools: [...] } }`. Returns `{ tools }` with the tools verbatim.
+ * The ground-truth section (and teach-back "tool" name) for the server's
+ * `instructions` string, graded only when instructions are given.
  */
-export function normalizePayload(raw) {
+export const SERVER_INSTRUCTIONS = "server-instructions";
+
+const isMessage = (m) => Boolean(m) && typeof m === "object" && !Array.isArray(m) && ("result" in m || "jsonrpc" in m);
+const str = (v) => (typeof v === "string" && v.trim() ? v : null);
+
+/**
+ * Accept a bare tools array, `{ tools: [...] }`, a JSON-RPC response
+ * `{ result: { tools: [...] } }`, or a capture of JSON-RPC responses
+ * `[<initialize response>, <tools/list response>]`. Returns `{ tools }` with
+ * the tools verbatim, plus `instructions` when the server sent any: from the
+ * `instructions` option (the --instructions file, which wins), else from the
+ * capture (`instructions`, `result.instructions`, or an initialize response
+ * in a capture array).
+ */
+export function normalizePayload(raw, { instructions } = {}) {
   let tools = null;
-  if (Array.isArray(raw)) tools = raw;
-  else if (raw && Array.isArray(raw.tools)) tools = raw.tools;
-  else if (raw && raw.result && Array.isArray(raw.result.tools)) tools = raw.result.tools;
-  if (!tools || tools.length === 0) {
-    throw new Error("tools payload: expected a non-empty tools array (bare, under `tools`, or under `result.tools`)");
+  let captured = null;
+  if (Array.isArray(raw) && raw.length > 0 && raw.every(isMessage)) {
+    for (const m of raw) {
+      if (!tools && Array.isArray(m.result?.tools)) tools = m.result.tools;
+      captured ??= str(m.result?.instructions);
+    }
+  } else if (Array.isArray(raw)) tools = raw;
+  else if (raw && Array.isArray(raw.tools)) {
+    tools = raw.tools;
+    captured = str(raw.instructions);
+  } else if (raw && raw.result && Array.isArray(raw.result.tools)) {
+    tools = raw.result.tools;
+    captured = str(raw.result.instructions);
   }
+  if (!tools || tools.length === 0) {
+    throw new Error("tools payload: expected a non-empty tools array (bare, under `tools`, under `result.tools`, or in a JSON-RPC capture)");
+  }
+  if (instructions !== undefined && instructions !== null && !str(instructions)) {
+    throw new Error("instructions: the --instructions file is empty");
+  }
+  const text = str(instructions) ?? captured;
   for (const t of tools) {
     if (!t || typeof t.name !== "string" || !t.name) {
       throw new Error("tools payload: every tool needs a string `name`");
     }
+    if (text && t.name === SERVER_INSTRUCTIONS) {
+      throw new Error(`tools payload: a tool is named ${SERVER_INSTRUCTIONS}, which is reserved for the server instructions`);
+    }
   }
-  return { tools };
+  return text ? { tools, instructions: text } : { tools };
 }
 
 export function toolNames(payload) {
@@ -68,11 +100,15 @@ export function parseTruth(markdown) {
   return { tools };
 }
 
-/** Every tool in the payload must have ground truth, and vice versa. */
+/**
+ * Every tool in the payload must have ground truth, and vice versa. The
+ * optional `## server-instructions` section is exempt: it is never required,
+ * and it is graded only when the payload carries instructions.
+ */
 export function checkTruthCoverage(truth, payload) {
   const names = new Set(toolNames(payload));
   const missing = [...names].filter((n) => !truth.tools[n]);
-  const extra = Object.keys(truth.tools).filter((n) => !names.has(n));
+  const extra = Object.keys(truth.tools).filter((n) => !names.has(n) && n !== SERVER_INSTRUCTIONS);
   const problems = [];
   if (missing.length) problems.push(`no ground truth for: ${missing.join(", ")}`);
   if (extra.length) problems.push(`ground truth names tools not in the payload: ${extra.join(", ")}`);
@@ -116,4 +152,14 @@ export function normalizeRequests(raw, payload) {
 /** The ONLY view of the requests a reader ever sees. */
 export function readerRequests(requests) {
   return requests.map((r) => ({ id: r.id, request: r.request }));
+}
+
+/**
+ * The ground truth a run grades: without server instructions, an optional
+ * `## server-instructions` section is set aside (nothing to grade it against).
+ */
+export function gradedTruth(truth, payload) {
+  if (payload.instructions || !truth.tools[SERVER_INSTRUCTIONS]) return truth;
+  const { [SERVER_INSTRUCTIONS]: _unused, ...tools } = truth.tools;
+  return { ...truth, tools };
 }
