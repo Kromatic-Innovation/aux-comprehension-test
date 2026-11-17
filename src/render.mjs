@@ -22,6 +22,13 @@ export function renderVerdictMd(result) {
     if (g.counts.structural) L.push(`- ${g.counts.structural} structural row(s) below`);
     L.push("");
   }
+  if (result.judge.failures?.length) {
+    L.push("## Judge failures", "");
+    for (const f of result.judge.failures) {
+      L.push(`- ${f.purpose}: ${f.reason} (stop reason: ${f.stopReason ?? "unknown"})${f.file ? `; raw reply kept in ${f.file}` : ""}`);
+    }
+    L.push("");
+  }
   if (result.skipped.length) {
     L.push("## Skipped readers", "");
     for (const s of result.skipped) L.push(`- ${s.personaId} × ${s.model}: ${s.reason}`);

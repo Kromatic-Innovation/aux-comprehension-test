@@ -57,6 +57,13 @@ First version.
 - The package root exports only the six stable names (`run`, `RunError`,
   `VERSION`, `HOST_CAVEAT`, `main`, `EXIT`). The unstable internals moved to
   the `aux-comprehension-test/internal` subpath.
+- The judge grades teach-back in batches of 5 tools per call, and the pre-run
+  estimate prices every batch, so a large payload is graded instead of failing
+  on a reply cut off at the output cap. A judge call that still fails keeps its
+  raw reply (first and last 2 KB) under `judge/` in the run directory and
+  records the provider's stop reason in `verdict.json` `judge.failures`; its
+  rows read `unverified (judge failed: <reason>)`, and `unverified (no judge)`
+  is kept for runs without `--judge`.
 
 ### Changed
 

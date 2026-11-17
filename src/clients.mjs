@@ -88,6 +88,18 @@ async function post(url, headers, body, provider, { fetch: fetchImpl = globalThi
 /** `retries` on a successful reply, only when there were any. */
 const retried = (r) => (r.retries ? { retries: r.retries } : {});
 
+/**
+ * Why the provider stopped generating, as `stopReason`. The three spellings of
+ * "hit the output cap" (Anthropic `max_tokens`, chat-completions `length`,
+ * Gemini `MAX_TOKENS`) are normalized to `max_tokens`, so a caller can tell a
+ * cut-off reply from any other stop without knowing the provider. Any other
+ * value is passed through; an absent one adds no field.
+ */
+export function stopped(reason) {
+  if (typeof reason !== "string" || !reason) return {};
+  return { stopReason: reason === "length" || reason === "MAX_TOKENS" ? "max_tokens" : reason };
+}
+
 /** A failed call, as a client returns it: no `status`/`retryAfter` internals. */
 const failure = (r) => ({ ok: false, reason: r.reason, ...retried(r) });
 
@@ -106,7 +118,7 @@ export function anthropicClient(model, apiKey, opts = {}) {
       if (!r.ok) return failure(r);
       const text = (r.json.content ?? []).filter((b) => b.type === "text").map((b) => b.text).join("");
       const u = r.json.usage ?? {};
-      return { ok: true, text, model, usage: { inputTokens: u.input_tokens, outputTokens: u.output_tokens }, ...retried(r) };
+      return { ok: true, text, model, usage: { inputTokens: u.input_tokens, outputTokens: u.output_tokens }, ...stopped(r.json.stop_reason), ...retried(r) };
     },
     /** Provider token count (free endpoint). Used only when explicitly requested. */
     async countTokens(text) {
@@ -137,7 +149,7 @@ function chatCompletionsClient(provider, url, model, apiKey, opts = {}) {
       if (!r.ok) return failure(r);
       const text = r.json.choices?.[0]?.message?.content ?? "";
       const u = r.json.usage ?? {};
-      return { ok: true, text, model, usage: { inputTokens: u.prompt_tokens, outputTokens: u.completion_tokens }, ...retried(r) };
+      return { ok: true, text, model, usage: { inputTokens: u.prompt_tokens, outputTokens: u.completion_tokens }, ...stopped(r.json.choices?.[0]?.finish_reason), ...retried(r) };
     },
   };
 }
@@ -159,7 +171,7 @@ export function googleClient(model, apiKey, opts = {}) {
       if (!r.ok) return failure(r);
       const text = (r.json.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("");
       const u = r.json.usageMetadata ?? {};
-      return { ok: true, text, model, usage: { inputTokens: u.promptTokenCount, outputTokens: u.candidatesTokenCount }, ...retried(r) };
+      return { ok: true, text, model, usage: { inputTokens: u.promptTokenCount, outputTokens: u.candidatesTokenCount }, ...stopped(r.json.candidates?.[0]?.finishReason), ...retried(r) };
     },
   };
 }
