@@ -176,9 +176,7 @@ export function decide({ clusters, readers, rereads, teachBackGraded, tokenWeigh
     ? `unverified (judge failed: ${judgeFailure.reread})`
     : rereads
       ? "unverified (judge returned no re-read for this row)"
-      : judgeFailure
-        ? "unverified (judge failed)"
-        : "unverified (no judge)";
+      : "unverified (no judge)";
   const rows = [];
   const nReaders = readers.length;
   for (const c of clusters.values()) {
@@ -227,7 +225,8 @@ export function decide({ clusters, readers, rereads, teachBackGraded, tokenWeigh
       judgeFailure?.teachBack
         ? `teach-back drift not graded (judge failed: ${judgeFailure.teachBack}); pass requires a graded teach-back, so see judge/ and grade readers/ side by side`
         : judgeFailure
-          ? "teach-back drift not graded (judge failed); pass requires a graded teach-back, so grade readers/ side by side"
+          ? // A judge was configured and did not fail: nothing reached it (no reader answered).
+            "teach-back drift not graded (no reader answer to grade); pass requires a graded teach-back"
           : "teach-back drift not graded (no --judge); pass requires a judge, so grade readers/ side by side",
     );
   }

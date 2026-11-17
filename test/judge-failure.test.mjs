@@ -140,3 +140,12 @@ test("stopped normalizes every provider's output-cap stop to max_tokens", () => 
   assert.deepEqual(stopped("end_turn"), { stopReason: "end_turn" });
   assert.deepEqual(stopped(undefined), {});
 });
+
+test("a configured judge with no reader answer to grade is not reported as failed or absent", async () => {
+  const res = await runMini({ script: () => null });
+  assert.equal(res.readers.every((r) => r.status === "error"), true);
+  assert.deepEqual(res.judge.failures, []);
+  const w = res.grade.withheldPass.find((x) => /teach-back/.test(x));
+  assert.match(w, /no reader answer to grade/);
+  assert.ok(!/judge failed|no --judge/.test(w));
+});
