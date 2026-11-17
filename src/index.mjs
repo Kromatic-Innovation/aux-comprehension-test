@@ -1,21 +1,7 @@
-// aux-comprehension-test — public entrypoint.
+// aux-comprehension-test — public entrypoint: the stable surface only.
+//
+// Everything else lives behind the `aux-comprehension-test/internal` subpath
+// (src/internal.mjs) and may change in any 0.x release.
 
-export { run, writeOutputs, RunError, HOST_CAVEAT, VERSION } from "./run.mjs";
+export { run, RunError, HOST_CAVEAT, VERSION } from "./run.mjs";
 export { main, EXIT } from "./cli.mjs";
-export { normalizePayload, parseTruth, checkTruthCoverage, normalizeRequests, readerRequests, NO_TOOL } from "./inputs.mjs";
-export {
-  registerReaderPersonas,
-  buildPanel,
-  parseModelSpec,
-  buildReaderArtifact,
-  renderReaderPrompt,
-  runReader,
-  READER_INSTRUCTION,
-  RESPONSE_SCHEMA,
-  DEFAULT_PERSONA_IDS,
-} from "./reader.mjs";
-export { gradeTeachBack, reread } from "./judge.mjs";
-export { buildClusters, rereadCandidates, decide, isLengthOnly, lengthPromoted } from "./grade.mjs";
-export { measureTokenWeight, renderTokenWeightMd } from "./tokenweight.mjs";
-export { loadPrices, priceFor, estimate, meter, actual } from "./cost.mjs";
-export { clientFor, anthropicClient, openaiClient, xaiClient, googleClient, KEY_ENV } from "./clients.mjs";

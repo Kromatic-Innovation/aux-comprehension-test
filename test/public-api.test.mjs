@@ -1,17 +1,19 @@
 // The documented public surface of the package entrypoint.
 //
 // README.md's "Stable surface" table is the contract: exactly these names are
-// public, each has a direct test here, and everything else re-exported from
-// src/index.mjs is an unstable internal. The first two tests keep the README
-// and the actual exports from drifting apart, so the promise in the README
-// cannot quietly stop being true.
+// exported from the package root, each has a direct test here, and everything
+// else lives behind the `aux-comprehension-test/internal` subpath. The first
+// tests keep the README, package.json `exports` and the actual exports from
+// drifting apart, so the promise in the README cannot quietly stop being true.
 
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import * as api from "../src/index.mjs";
+// Through package.json `exports` (a self-reference), as a consumer resolves it.
+import * as api from "aux-comprehension-test";
+import * as internal from "aux-comprehension-test/internal";
 import { fixture, fixtureJson, mockClientFor, resetRegistry, TEST_PRICES } from "./_mock.mjs";
 import { miniReader } from "./_mini.mjs";
 
@@ -41,8 +43,23 @@ const runViaEntrypoint = (opts = {}) =>
 
 test("the stable surface is exported from the package entrypoint", () => {
   for (const name of STABLE) {
-    assert.ok(name in api, `${name} is documented but not exported from src/index.mjs`);
+    assert.ok(name in api, `${name} is documented but not exported from the package root`);
     assert.notEqual(api[name], undefined, `${name} is exported as undefined`);
+  }
+});
+
+test("the package root exports exactly the stable surface", () => {
+  assert.deepEqual(Object.keys(api).sort(), [...STABLE].sort());
+});
+
+test("package.json exports maps the root and ./internal, and nothing else", () => {
+  assert.deepEqual(JSON.parse(readRoot("package.json")).exports, { ".": "./src/index.mjs", "./internal": "./src/internal.mjs" });
+});
+
+test("./internal carries the unstable internals and none of the stable names", () => {
+  for (const name of STABLE) assert.equal(name in internal, false, `${name} is stable; it belongs at the root only`);
+  for (const name of ["decide", "buildClusters", "gradeTeachBack", "lengthPromoted", "rereadCandidates", "loadPrices", "clientFor", "estimate"]) {
+    assert.equal(typeof internal[name], "function", `${name} is missing from ./internal`);
   }
 });
 
@@ -63,9 +80,9 @@ test("README's Stable surface table names exactly the stable exports", () => {
   );
 
   // The unstable-internals promise is only meaningful if there ARE others.
-  const others = Object.keys(api).filter((k) => !STABLE.includes(k));
-  assert.ok(others.length > 0, "no non-stable exports: the unstable-internals note would be vacuous");
-  assert.match(section, /unstable\s+internal/i, "README does not mark the remaining exports as unstable internals");
+  assert.ok(Object.keys(internal).length > 0, "./internal is empty: the unstable-internals note would be vacuous");
+  assert.match(section, /unstable\s+internal/i, "README does not mark ./internal as unstable internals");
+  assert.match(section, /aux-comprehension-test\/internal/, "README does not name the ./internal subpath");
 });
 
 test("run() completes a real offline run through the entrypoint", async () => {

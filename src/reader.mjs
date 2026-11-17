@@ -117,6 +117,18 @@ export function normalizeReaderVerdict(verdict) {
  * returned with `error` so the run can report it and carry on.
  */
 export async function runReader({ reader, client, payload, requests, maxTokens }) {
+  // panelist reports a failed call only as "no usable text"; keep the
+  // provider's own reason (HTTP status, retries) so the reader's error says why.
+  let lastFailure = null;
+  const watched = {
+    ...client,
+    model: client.model,
+    async complete(args) {
+      const res = await client.complete(args);
+      lastFailure = res && res.ok === false && res.reason ? res.reason : null;
+      return res;
+    },
+  };
   try {
     const out = await spawn(
       reader.personaId,
@@ -126,7 +138,7 @@ export async function runReader({ reader, client, payload, requests, maxTokens }
         instruction: READER_INSTRUCTION,
         responseSchema: RESPONSE_SCHEMA,
       },
-      { client, maxTokens },
+      { client: watched, maxTokens },
     );
     if (out.verdict == null) {
       return { ...reader, error: "reader reply carried no parseable verdict", raw: out.message };
@@ -139,6 +151,7 @@ export async function runReader({ reader, client, payload, requests, maxTokens }
       honesty: out.honesty,
     };
   } catch (err) {
-    return { ...reader, error: err?.message ?? String(err) };
+    const message = err?.message ?? String(err);
+    return { ...reader, error: lastFailure ? `${message}: ${lastFailure}` : message };
   }
 }

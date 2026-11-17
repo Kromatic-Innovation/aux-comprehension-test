@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { runMini } from "./_mini.mjs";
 import { resetRegistry, TEST_PRICES } from "./_mock.mjs";
 import { readFileSync } from "node:fs";
-import { estimate, priceFor, loadPrices, actual, validPrice } from "../src/cost.mjs";
+import { estimate, priceFor, loadPrices, actual, validPrice, meter } from "../src/cost.mjs";
 
 beforeEach(resetRegistry);
 
@@ -71,7 +71,40 @@ test("estimate counts the full output cap per call", () => {
   const est = estimate([{ purpose: "r", model: "gpt-5", prompt: "x".repeat(4000), maxTokens: 1000 }], TEST_PRICES);
   assert.equal(est.calls[0].inputTokens, 1000);
   assert.equal(est.calls[0].outputTokens, 1000);
-  assert.equal(est.usd, (1000 * 1.25 + 1000 * 10) / 1e6);
+  // Plus the worst case of MAX_RETRIES retried attempts, each input-only.
+  assert.equal(est.calls[0].retries, 2);
+  assert.equal(est.usd, (1000 * 1.25 + 1000 * 10) / 1e6 + 2 * ((1000 * 1.25) / 1e6));
+});
+
+test("estimate counts the maximum retries: input-only attempts, at the call's tier", () => {
+  const c = [{ purpose: "r", model: "gpt-5", prompt: "x".repeat(4000), maxTokens: 1000 }];
+  const noRetry = estimate(c, TEST_PRICES, { maxRetries: 0 });
+  const withRetry = estimate(c, TEST_PRICES);
+  assert.equal(withRetry.maxRetries, 2);
+  assert.equal(noRetry.usd, (1000 * 1.25 + 1000 * 10) / 1e6);
+  assert.equal(withRetry.usd, noRetry.usd + 2 * ((1000 * 1.25) / 1e6));
+});
+
+test("actual spend counts every retried attempt the client reports", async () => {
+  const ledger = [];
+  const client = { model: "gpt-5", complete: async () => ({ ok: true, text: "abcd", model: "gpt-5", usage: { inputTokens: 10, outputTokens: 5 }, retries: 2 }) };
+  await meter(client, ledger, "reader r").complete({ prompt: "x".repeat(400) });
+  assert.equal(ledger.length, 3);
+  assert.deepEqual(ledger.filter((e) => e.retry).map((e) => [e.inputTokens, e.outputTokens]), [[100, 0], [100, 0]]);
+  const a = actual(ledger, TEST_PRICES);
+  assert.equal(a.retries, 2);
+  assert.equal(a.approximate, true);
+  assert.equal(a.usd, (10 * 1.25 + 5 * 10) / 1e6 + 2 * ((100 * 1.25 + 0 * 10) / 1e6));
+  // The worst-case estimate for the same call still bounds it.
+  assert.ok(a.usd <= estimate([{ purpose: "r", model: "gpt-5", prompt: "x".repeat(400), maxTokens: 5 }], TEST_PRICES).usd);
+});
+
+test("a reply with no retries adds no retry rows", async () => {
+  const ledger = [];
+  const client = { model: "gpt-5", complete: async () => ({ ok: false, reason: "openai HTTP 400: bad" }) };
+  await meter(client, ledger, "reader r").complete({ prompt: "x".repeat(40) });
+  assert.equal(ledger.length, 1);
+  assert.equal(actual(ledger, TEST_PRICES).retries, 0);
 });
 
 test("the bundled price table loads and has no zero prices", () => {
@@ -119,13 +152,14 @@ const call = (chars) => ({ purpose: "r", model: "tiered", prompt: "x".repeat(cha
 test("a prompt over a tier's threshold is estimated at the higher tier", () => {
   const over = estimate([call(4004)], { tiered: TIERED }); // 1001 input tokens
   assert.equal(over.calls[0].inputTokens, 1001);
-  assert.equal(over.usd, (1001 * 5 + 100 * 25) / 1e6);
+  assert.equal(over.usd, (1001 * 5 + 100 * 25) / 1e6 + 2 * ((1001 * 5 + 0 * 25) / 1e6));
 });
 
 test("a prompt at or under a tier's threshold uses the lower tier", () => {
-  const at = estimate([call(4000)], { tiered: TIERED }); // exactly 1000
+  // maxRetries: 0 isolates the tier rule from the retry allowance.
+  const at = estimate([call(4000)], { tiered: TIERED }, { maxRetries: 0 }); // exactly 1000
   assert.equal(at.usd, (1000 * 1 + 100 * 5) / 1e6);
-  const under = estimate([call(400)], { tiered: TIERED });
+  const under = estimate([call(400)], { tiered: TIERED }, { maxRetries: 0 });
   assert.equal(under.usd, (100 * 1 + 100 * 5) / 1e6);
 });
 
@@ -178,6 +212,6 @@ test("an unpriced model still refuses alongside a tiered one", () => {
 test("bundled claude-haiku-5-5 carries its over-100,000-token tier", () => {
   const p = loadPrices()["claude-haiku-5-5"];
   assert.deepEqual(p, { input: 0.1, output: 0.5, above: { tokens: 100000, input: 0.5, output: 2.5 } });
-  const big = estimate([{ purpose: "r", model: "claude-haiku-5-5", prompt: "x".repeat(400004), maxTokens: 1000 }], loadPrices());
+  const big = estimate([{ purpose: "r", model: "claude-haiku-5-5", prompt: "x".repeat(400004), maxTokens: 1000 }], loadPrices(), { maxRetries: 0 });
   assert.equal(big.usd, (100001 * 0.5 + 1000 * 2.5) / 1e6);
 });

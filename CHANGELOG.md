@@ -44,6 +44,19 @@ First version.
   `panelist` coupling and its supported range, a best-effort maintenance
   statement, a fuller `CONTRIBUTING.md`, and which credential route wins in
   the live eval.
+- Provider calls retry a 429 or 5xx at most twice, honouring `Retry-After`
+  (1 s then 2 s otherwise). A call that still fails is reported on that
+  reader, with the provider's status, and the run carries on. Retried attempts
+  are counted in actual spend, and the pre-run estimate counts the maximum
+  retries for every call, so it stays an upper bound.
+- CI runs the suite on Node 20 and 22, audits runtime dependencies
+  (`npm audit --omit=dev --audit-level=high`), and fails if the tarball would
+  ship anything outside `package.json` `files`.
+- Direct tests for the exported grading helpers `decide`, `buildClusters`,
+  `gradeTeachBack`, `lengthPromoted` and `rereadCandidates`.
+- The package root exports only the six stable names (`run`, `RunError`,
+  `VERSION`, `HOST_CAVEAT`, `main`, `EXIT`). The unstable internals moved to
+  the `aux-comprehension-test/internal` subpath.
 
 ### Changed
 

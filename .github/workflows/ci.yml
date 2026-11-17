@@ -11,17 +11,48 @@ permissions:
   contents: read
 
 jobs:
+  test:
+    name: Test (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci --no-audit --no-fund
+      # Offline: every reader and judge is scripted and fetch is disabled in
+      # the test suite. No provider key is available to this job.
+      - run: npm test
+
+  # The one required check. It depends on every matrix leg, so a red leg
+  # reds it (`if: always()` plus the first step stops a failed or cancelled
+  # leg from turning this job into a skipped, and so passing, check).
   ci:
     name: CI Required
+    needs: [test]
+    if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Every Node version passed
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+        run: |
+          if [ "$TEST_RESULT" != "success" ]; then
+            echo "::error::test matrix result: $TEST_RESULT"
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 20
       - run: npm ci --no-audit --no-fund
-      # Offline: every reader and judge is scripted and fetch is disabled in
-      # the test suite. No provider key is available to this job.
-      - run: npm test
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev --audit-level=high
+      - name: Tarball ships only package.json `files`
+        run: node .github/check-pack-contents.mjs
       - name: Public-safe lint (org-agnostic leak shapes)
         run: bash .github/public-safe-lint.sh .

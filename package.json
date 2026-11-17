@@ -26,7 +26,8 @@
     "aux-comprehension-test": "bin/aux-comprehension-test.mjs"
   },
   "exports": {
-    ".": "./src/index.mjs"
+    ".": "./src/index.mjs",
+    "./internal": "./src/internal.mjs"
   },
   "files": [
     "bin",
