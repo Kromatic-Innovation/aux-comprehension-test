@@ -225,3 +225,16 @@ test("gradeTeachBack throws on a failed or non-JSON judge reply", async () => {
   const prose = { model: "judge-m", complete: async () => ({ ok: true, text: "no json here" }) };
   await assert.rejects(gradeTeachBack(prose, truth, []), /not a JSON object/);
 });
+
+test("buildClusters: a promoted length complaint exempts its cluster whichever reader came first", () => {
+  const amb = { tool: "beta", about: "description", issue: "unclear whether it charges", kind: "ambiguous" };
+  const long = { tool: "beta", about: "description", issue: "this is too long", kind: "other" };
+  const bench = { materiallyLonger: true, correlatesWithLowerSelection: true };
+  for (const order of [[amb, long], [long, amb]]) {
+    const readers = order.map((c, i) => reader(`p${i}`, i ? "openai" : "anthropic", { ...clean, confusion: [c] }));
+    const clusters = buildClusters({ readers, requests, truth, teachBackGrades: null, lengthBenchmark: bench });
+    assert.equal(clusters.get("confusion:beta:description").lengthPromoted, true);
+    const g = decide({ clusters, readers, rereads: new Map(), teachBackGraded: true, tokenWeight: null });
+    assert.equal(g.cutList[0].class, "must-fix");
+  }
+});

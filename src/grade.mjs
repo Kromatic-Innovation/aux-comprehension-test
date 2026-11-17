@@ -116,14 +116,12 @@ export function buildClusters({ readers, requests, truth, teachBackGrades, lengt
         );
         continue;
       }
+      const key = `confusion:${norm(c.tool)}:${norm(c.about)}`;
+      add(clusters, key, { kind: "confusion", tools: [c.tool], about: c.about, defect: `Confusing copy: ${c.tool} / ${c.about}.` }, { ...who, evidence: c.issue });
       // A benchmark-promoted length complaint is backed by outside evidence of
-      // lower selection, so it is not "confusion only".
-      add(
-        clusters,
-        `confusion:${norm(c.tool)}:${norm(c.about)}`,
-        { kind: "confusion", tools: [c.tool], about: c.about, defect: `Confusing copy: ${c.tool} / ${c.about}.`, ...(isLengthOnly(c) ? { lengthPromoted: true } : {}) },
-        { ...who, evidence: c.issue },
-      );
+      // lower selection, so a cluster holding one (from any reader, in any
+      // order) is not "confusion only".
+      if (isLengthOnly(c)) clusters.get(key).lengthPromoted = true;
     }
 
     // Teach-back: a missing explanation is mechanical; drift needs the judge.
