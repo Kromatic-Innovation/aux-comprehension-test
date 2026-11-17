@@ -53,11 +53,13 @@ const words = (s) => new Set(String(s).toLowerCase().match(/[a-z]{5,}/g) ?? []);
  * A scripted judge. Teach-back: recovered when the reader's words share at
  * least two significant words with the intended meaning. Re-read: every
  * single-reader complaint is judged unambiguous unless `ambiguousIds` names it.
+ * `pad` adds that many chars of commentary per grade (a verbose judge);
+ * `honourCap` cuts the reply off at the call's maxTokens, as a provider does.
  */
-export function scriptedJudge(model, { ambiguousIds = [], prompts } = {}) {
+export function scriptedJudge(model, { ambiguousIds = [], prompts, pad = 0, honourCap = false } = {}) {
   return {
     model,
-    async complete({ prompt }) {
+    async complete({ prompt, maxTokens }) {
       prompts?.push({ model, prompt });
       let out;
       if (prompt.includes("COMPLAINTS:")) {
@@ -69,12 +71,19 @@ export function scriptedJudge(model, { ambiguousIds = [], prompts } = {}) {
           grades: items.map((it) => {
             const a = words(it.intended);
             const shared = [...words(it.reader)].filter((w) => a.has(w)).length;
-            return { tool: it.tool, recovered: shared >= 2, drift: shared >= 2 ? "" : "purpose not recovered" };
+            return { tool: it.tool, recovered: shared >= 2, drift: shared >= 2 ? "" : "purpose not recovered", ...(pad ? { why: "w".repeat(pad) } : {}) };
           }),
         };
       }
-      const text = JSON.stringify(out);
-      return { ok: true, text, model, usage: { inputTokens: Math.ceil(prompt.length / 4), outputTokens: Math.ceil(text.length / 4) } };
+      let text = JSON.stringify(out);
+      // honourCap: behave like a real provider at the output cap -- the reply
+      // is cut off at ~maxTokens tokens (chars / 4) and says so.
+      let stop = "end_turn";
+      if (honourCap && Math.ceil(text.length / 4) > maxTokens) {
+        text = text.slice(0, maxTokens * 4);
+        stop = "max_tokens";
+      }
+      return { ok: true, text, model, stopReason: stop, usage: { inputTokens: Math.ceil(prompt.length / 4), outputTokens: Math.ceil(text.length / 4) } };
     },
   };
 }

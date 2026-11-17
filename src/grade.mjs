@@ -8,7 +8,8 @@
 //   must-fix       tripped by two or more distinct readers, or by one reader
 //                  where the judge's re-read found the copy ambiguous.
 //   reader-error   tripped by exactly one reader, copy unambiguous on re-read
-//                  (or not re-read: no judge). Not a must-fix.
+//                  (or not re-read: no judge, or the judge failed -- the row
+//                  says which). Not a must-fix.
 //   structural     a tool whose purpose no reader recovered. Yields `fail`.
 //   informational  length-only complaints and token-weight flags. Never
 //                  moves the verdict.
@@ -140,8 +141,16 @@ export function rereadCandidates(clusters) {
  * @param {Map|null} args.rereads       cluster id -> {ambiguous, why}; null when no judge
  * @param {boolean} args.teachBackGraded
  * @param {object|null} args.tokenWeight
+ * @param {{teachBack: string|null, reread: string|null}|null} [args.judgeFailure]
+ *        null when no judge was configured; otherwise the failure reason (or
+ *        null) for each judge job, so an errored judge is never labelled "no judge"
  */
-export function decide({ clusters, readers, rereads, teachBackGraded, tokenWeight }) {
+export function decide({ clusters, readers, rereads, teachBackGraded, tokenWeight, judgeFailure = null }) {
+  const unverified = judgeFailure?.reread
+    ? `unverified (judge failed: ${judgeFailure.reread})`
+    : rereads
+      ? "unverified (judge returned no re-read for this row)"
+      : "unverified (no judge)";
   const rows = [];
   const nReaders = readers.length;
   for (const c of clusters.values()) {
@@ -153,7 +162,7 @@ export function decide({ clusters, readers, rereads, teachBackGraded, tokenWeigh
     else if (distinct >= 2) cls = "must-fix";
     else {
       const rr = rereads?.get(c.id) ?? null;
-      reread = rr ? { ambiguous: rr.ambiguous, why: rr.why } : "unverified (no judge)";
+      reread = rr ? { ambiguous: rr.ambiguous, why: rr.why } : unverified;
       cls = rr && rr.ambiguous ? "must-fix" : "reader-error";
     }
     const { informational, ...rest } = c;
@@ -169,7 +178,16 @@ export function decide({ clusters, readers, rereads, teachBackGraded, tokenWeigh
   const withheld = [];
   if (nReaders < 2) withheld.push("fewer than two readers answered; one reader is never a run");
   if (!crossModel) withheld.push(`single-provider panel (${providers.join(", ") || "none"}); crossModel is required for pass`);
-  if (!teachBackGraded) withheld.push("teach-back drift not graded (no --judge); pass requires a judge, so grade readers/ side by side");
+  if (!teachBackGraded) {
+    withheld.push(
+      judgeFailure?.teachBack
+        ? `teach-back drift not graded (judge failed: ${judgeFailure.teachBack}); pass requires a graded teach-back, so see judge/ and grade readers/ side by side`
+        : judgeFailure
+          ? // A judge was configured and did not fail: nothing reached it (no reader answered).
+            "teach-back drift not graded (no reader answer to grade); pass requires a graded teach-back"
+          : "teach-back drift not graded (no --judge); pass requires a judge, so grade readers/ side by side",
+    );
+  }
 
   let verdict;
   if (count("structural") > 0) verdict = "fail";

@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { getPersona, USAGE_HEADER } from "panelist";
 import { normalizePayload, parseTruth, checkTruthCoverage, normalizeRequests } from "./inputs.mjs";
 import { registerReaderPersonas, buildPanel, parseModelSpec, renderReaderPrompt, runReader, DEFAULT_PERSONA_IDS } from "./reader.mjs";
-import { gradeTeachBack, reread, buildTeachBackPrompt, buildRereadPrompt } from "./judge.mjs";
+import { gradeTeachBack, reread, buildTeachBackPrompt, buildRereadPrompt, teachBackBatches } from "./judge.mjs";
 import { buildClusters, rereadCandidates, decide } from "./grade.mjs";
 import { measureTokenWeight, renderTokenWeightMd } from "./tokenweight.mjs";
 import { loadPrices, estimate, meter, actual } from "./cost.mjs";
@@ -123,9 +123,18 @@ export async function run(opts, deps = {}) {
     maxTokens,
   }));
   if (pricedJudge) {
+    // Every teach-back batch is its own call, each at the full output cap.
     const fakeTeachBack = Object.keys(truth.tools).map((tool) => ({ tool, meaning: "x".repeat(Math.ceil((maxTokens * 4) / Object.keys(truth.tools).length)) }));
+    const batches = teachBackBatches(truth);
     for (const { reader } of priced) {
-      calls.push({ purpose: `judge teach-back ${reader.personaId}`, model: pricedJudge, prompt: buildTeachBackPrompt(truth, fakeTeachBack), maxTokens: judgeMaxTokens });
+      batches.forEach((tools, i) => {
+        calls.push({
+          purpose: `judge teach-back ${reader.personaId} (batch ${i + 1}/${batches.length})`,
+          model: pricedJudge,
+          prompt: buildTeachBackPrompt(truth, fakeTeachBack, tools),
+          maxTokens: judgeMaxTokens,
+        });
+      });
     }
     calls.push({ purpose: "judge re-read", model: pricedJudge, prompt: buildRereadPrompt(payload, []) + "x".repeat(8000), maxTokens: judgeMaxTokens });
   }
@@ -163,8 +172,20 @@ export async function run(opts, deps = {}) {
   const ok = results.filter((r) => r.response);
 
   // Judge: teach-back grades, then a re-read of single-reader complaints.
+  // A failed judge call is recorded, never thrown: the run still reports,
+  // with pass withheld and the affected rows labelled `judge failed`.
   let teachBackGrades = null;
-  let judgeErrors = [];
+  const judgeErrors = [];
+  const judgeFailures = [];
+  const judgeFailed = (purpose, err) => {
+    judgeErrors.push(err.message);
+    judgeFailures.push({
+      purpose,
+      reason: err.reason ?? err.message,
+      stopReason: err.stopReason ?? null,
+      ...(err.raw != null ? { raw: err.raw, file: `judge/${judgeFailures.length + 1}-${safe(purpose)}.txt` } : {}),
+    });
+  };
   if (judge.client) {
     const jc = meter(judge.client, ledger, "judge");
     teachBackGrades = new Map();
@@ -172,22 +193,32 @@ export async function run(opts, deps = {}) {
       try {
         teachBackGrades.set(`${r.personaId}__${r.model}`, await gradeTeachBack(jc, truth, r.response.teachBack, { maxTokens: judgeMaxTokens }));
       } catch (err) {
-        judgeErrors.push(err.message);
+        judgeFailed(`teach-back ${r.personaId}__${r.model}`, err);
       }
     }
   }
-  const teachBackGraded = Boolean(judge.client) && judgeErrors.length === 0 && ok.length > 0;
+  const teachBackGraded = Boolean(judge.client) && judgeFailures.length === 0 && ok.length > 0;
   const clusters = buildClusters({ readers: ok, requests, truth, teachBackGrades, lengthBenchmark: opts.lengthBenchmark ?? null });
   let rereads = null;
+  let rereadFailure = null;
   if (judge.client) {
     try {
       rereads = await reread(meter(judge.client, ledger, "judge"), payload, rereadCandidates(clusters), { maxTokens: judgeMaxTokens });
     } catch (err) {
-      judgeErrors.push(err.message);
+      judgeFailed("re-read", err);
+      rereadFailure = judgeFailures[judgeFailures.length - 1].reason;
     }
   }
+  const judgeFailure = judgeFailures.length ? failureSummary(judgeFailures) : null;
   const tokenWeight = await measureTokenWeight(payload);
-  const grade = decide({ clusters, readers: ok, rereads, teachBackGraded, tokenWeight });
+  const grade = decide({
+    clusters,
+    readers: ok,
+    rereads,
+    teachBackGraded,
+    tokenWeight,
+    judgeFailure: judge.client ? { teachBack: teachBackGraded ? null : judgeFailure, reread: rereadFailure } : null,
+  });
 
   const result = {
     status: "completed",
@@ -203,19 +234,37 @@ export async function run(opts, deps = {}) {
       file: `readers/${readerFileName(r)}`,
     })),
     skipped,
-    judge: { model: judge.model, skipped: judge.skipped, errors: judgeErrors },
+    judge: {
+      model: judge.model,
+      skipped: judge.skipped,
+      errors: judgeErrors,
+      // One entry per failed judge call: why, the provider's stop reason
+      // (`max_tokens` = cut off), and where the clipped raw reply was saved.
+      failures: judgeFailures.map(({ raw, ...f }) => f),
+    },
     lengthBenchmark: opts.lengthBenchmark ?? null,
     cost: { maxUsd: opts.maxUsd, estimate: est, actual: actual(ledger, prices) },
     tokenWeight: { label: tokenWeight.label, method: tokenWeight.method, total: tokenWeight.total, flags: tokenWeight.flags },
     honesty: [USAGE_HEADER, HOST_CAVEAT],
   };
 
-  if (opts.out) writeOutputs(opts.out, result, results, tokenWeight);
+  if (opts.out) writeOutputs(opts.out, result, results, tokenWeight, judgeFailures);
   return result;
 }
 
-export function writeOutputs(out, result, readerResults, tokenWeight) {
+/** A short cause for row labels: the first failure, plus how many more. */
+function failureSummary(failures) {
+  const first = failures[0].reason;
+  return failures.length > 1 ? `${first}; +${failures.length - 1} more` : first;
+}
+
+export function writeOutputs(out, result, readerResults, tokenWeight, judgeFailures = []) {
   mkdirSync(join(out, "readers"), { recursive: true });
+  const kept = judgeFailures.filter((f) => f.file);
+  if (kept.length) mkdirSync(join(out, "judge"), { recursive: true });
+  for (const f of kept) {
+    writeFileSync(join(out, f.file), `# judge call: ${f.purpose}\n# stop reason: ${f.stopReason ?? "unknown"}\n# reason: ${f.reason}\n\n${f.raw}\n`);
+  }
   for (const r of readerResults) {
     const body = {
       personaId: r.personaId,

@@ -156,6 +156,7 @@ Readers see only each request's `id` and `request` text.
 | `token-weight.md` | Bytes and approximate tokens for the whole payload and per tool (description, input schema, output schema). Informational |
 | `verdict.md` | The verdict, why it is not `pass` (if it is not), the cut-list, the actual spend |
 | `verdict.json` | The same, machine-readable |
+| `judge/<n>-<call>.txt` | Only when a judge call failed to parse: the judge's raw reply (first and last 2 KB), with the provider's stop reason (`max_tokens` means it was cut off) |
 
 The reader outputs quote your payload verbatim. Keep the run directory out of
 version control.
@@ -183,9 +184,17 @@ codes: `64` means fix your command line or inputs, `70` means report a bug.
   `verdict.md`, in `withheldPass` in `verdict.json` and on the CLI's
   `pass withheld:` line. This is deliberate: an ungraded teach-back is not
   evidence the copy was understood, so a judge-less run cannot certify it.
+  The judge grades teach-back in batches of 5 tools per call, so a large
+  payload never needs one reply big enough to be cut off at the output cap.
+  If a judge call fails anyway, `pass` is withheld the same way, but the
+  reason reads "judge failed: <reason>", not "no --judge"; `verdict.json`'s
+  `judge.failures` records the stop reason, and the raw reply is saved under
+  `judge/`.
 - **Reader error vs. copy defect.** A defect tripped by exactly one reader,
   where the copy is unambiguous on re-read, is a reader error, not a must-fix.
-  The judge does the re-read; without one the row is marked unverified. A defect
+  The judge does the re-read; without one the row is marked
+  `unverified (no judge)`, and when the judge was configured but failed it is
+  marked `unverified (judge failed: <reason>)`. A defect
   tripped by two or more readers is a must-fix.
 - **Length-only complaints are informational.** "Too long" is not a copy defect
   at current token budgets. It counts only when you pass `--length-benchmark`
@@ -352,7 +361,7 @@ A completed run resolves to the object written to `verdict.json`:
   },
   readers: [{ personaId, model, provider, status: "ok" | "error", error?, file }],
   skipped: [{ personaId, model, provider, reason }],   // readers with no key
-  judge: { model, skipped, errors },
+  judge: { model, skipped, errors, failures: [{ purpose, reason, stopReason, file? }] },
   lengthBenchmark,                    // the option, echoed, or null
   cost: { maxUsd, estimate: { usd, maxRetries, calls }, actual: { usd, approximate, retries, calls } },
   tokenWeight: { label, method, total: { bytes, tokens }, flags },
