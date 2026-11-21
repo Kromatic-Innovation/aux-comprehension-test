@@ -223,10 +223,19 @@ codes: `64` means fix your command line or inputs, `70` means report a bug.
   evidence the copy was understood, so a judge-less run cannot certify it.
   The judge grades teach-back in batches of 5 tools per call, so a large
   payload never needs one reply big enough to be cut off at the output cap.
-  If a judge call fails anyway, `pass` is withheld the same way, but the
+  If a teach-back call fails anyway, `pass` is withheld the same way, but the
   reason reads "judge failed: <reason>", not "no --judge"; `verdict.json`'s
   `judge.failures` records the stop reason, and the raw reply is saved under
   `judge/`.
+- **The re-read is batched too.** Single-reader rows go to the judge in
+  batches sized from the judge's output cap (one row per 300 tokens of it), so
+  no reply has to hold them all. A batch that fails (cut off, or not JSON) is
+  recorded and the next batch is still sent. Before each re-read call, the
+  spend so far plus that call's upper bound is checked against `--max-usd`; if
+  it would go over, the re-read stops there. Any single-reader row left
+  without a verdict (its batch failed, the judge's reply left it out, or the
+  spend cap stopped the re-read) withholds `pass`, with "re-read incomplete:
+  N of M single-reader rows unverified" and the cause of each.
 - **Must-fix needs a misreading.** A misreading is a routing miss (on the
   expected tool, and on a tool picked wrongly) or teach-back drift the judge
   confirmed against your ground truth. A confusion report is reported unease,
@@ -258,8 +267,10 @@ codes: `64` means fix your command line or inputs, `70` means report a bug.
   two readers answered, when fewer readers answered than the panel was
   configured for (a reader whose reply could not be parsed, whose call failed,
   or that was skipped for a missing key; the reason names each one and why),
-  or when teach-back was not graded (no `--judge`, or the judge failed). A
-  run that fails still fails.
+  when teach-back was not graded (no `--judge`, or the judge failed), or when
+  the judge's re-read did not complete: any single-reader row left without a
+  verdict (a cut-off or unparseable batch, a reply that left the row out, or
+  `--max-usd` reached before it was sent). A run that fails still fails.
 - **pass**: no must-fix rows, readers from at least two providers, and graded
   teach-back.
 
@@ -283,6 +294,11 @@ estimate and in the actual spend, so the estimate stays an upper bound.
 `claude-haiku-5-5` is bundled this way (0.1 / 0.5 up to 100,000 input tokens,
 0.5 / 2.5 above). An `above` tier that is missing a field is treated as
 unpriced and refuses the run.
+The re-read's row count is only known once the readers answer, so the estimate
+prices it for one row per request plus two per tool (routing, teach-back and
+one confusion row per tool). A run that produces more rows than that still
+never goes over the ceiling: spend is checked again before every re-read call,
+and the re-read stops, withholding `pass`, rather than exceed `--max-usd`.
 Prices match the exact id or a `-YYYYMMDD` / `@...` snapshot of it only, so
 `gpt-5-pro`, `gpt-5-mini` and dashed-date snapshots are unpriced until you add
 them. Pass `--prices <file>` for any other model:
