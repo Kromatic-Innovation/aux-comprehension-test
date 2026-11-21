@@ -27,7 +27,8 @@
 // Verdict:
 //   fail         any structural row.
 //   conditional  must-fix rows exist (each a copy edit), or `pass` is
-//                withheld (single-provider panel, fewer than two readers, or
+//                withheld (single-provider panel, fewer than two readers,
+//                fewer readers answered than the panel was configured for, or
 //                teach-back not graded because no judge was configured).
 //   pass         no must-fix rows, crossModel, two or more readers, graded.
 
@@ -170,8 +171,13 @@ export function rereadCandidates(clusters) {
  * @param {{teachBack: string|null, reread: string|null}|null} [args.judgeFailure]
  *        null when no judge was configured; otherwise the failure reason (or
  *        null) for each judge job, so an errored judge is never labelled "no judge"
+ * @param {{configured: number, missing: Array<{personaId, model, reason}>}|null} [args.panel]
+ *        the configured panel size and every configured reader that returned no
+ *        parseable verdict (failed or skipped), with why. When fewer readers
+ *        answered than were configured, `pass` is withheld: the reader that went
+ *        missing may be the one that would have blocked.
  */
-export function decide({ clusters, readers, rereads, teachBackGraded, tokenWeight, judgeFailure = null }) {
+export function decide({ clusters, readers, rereads, teachBackGraded, tokenWeight, judgeFailure = null, panel = null }) {
   const unverified = judgeFailure?.reread
     ? `unverified (judge failed: ${judgeFailure.reread})`
     : rereads
@@ -219,6 +225,10 @@ export function decide({ clusters, readers, rereads, teachBackGraded, tokenWeigh
   const count = (cls) => rows.filter((r) => r.class === cls).length;
   const withheld = [];
   if (nReaders < 2) withheld.push("fewer than two readers answered; one reader is never a run");
+  if (panel && nReaders < panel.configured) {
+    const who = panel.missing.map((m) => `${m.personaId} × ${m.model} (${m.reason})`).join("; ");
+    withheld.push(`fewer readers answered than the panel was configured for (${nReaders} of ${panel.configured})${who ? `: ${who}` : ""}`);
+  }
   if (!crossModel) withheld.push(`single-provider panel (${providers.join(", ") || "none"}); crossModel is required for pass`);
   if (!teachBackGraded) {
     withheld.push(
