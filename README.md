@@ -255,8 +255,11 @@ codes: `64` means fix your command line or inputs, `70` means report a bug.
 - **fail**: structural. A tool whose purpose no reader recovered.
 - **conditional**: must-fix rows exist, each a copy edit; or `pass` is withheld.
   `pass` is withheld when the panel spans only one provider, when fewer than
-  two readers answered, or when teach-back was not graded (no `--judge`, or
-  the judge failed).
+  two readers answered, when fewer readers answered than the panel was
+  configured for (a reader whose reply could not be parsed, whose call failed,
+  or that was skipped for a missing key; the reason names each one and why),
+  or when teach-back was not graded (no `--judge`, or the judge failed). A
+  run that fails still fails.
 - **pass**: no must-fix rows, readers from at least two providers, and graded
   teach-back.
 
@@ -305,7 +308,9 @@ relying on an estimate. Actual usage is reported in `verdict.json` at the end.
 Keys are read from the environment only: `ANTHROPIC_API_KEY`,
 `OPENAI_API_KEY`, `XAI_API_KEY`, `GEMINI_API_KEY` (or `GOOGLE_API_KEY`). A
 provider whose key is missing is **skipped and reported**, not treated as a
-failure. Prefix a model id with `xai:` or `google:` (or `anthropic:` /
+failure. A skipped reader did not answer, though, so a run with one cannot
+`pass`: see "fewer readers answered than the panel was configured for" under
+the verdict rules. Prefix a model id with `xai:` or `google:` (or `anthropic:` /
 `openai:`) when the provider is not obvious from the id.
 
 ## Network and data sent
