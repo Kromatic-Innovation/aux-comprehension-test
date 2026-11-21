@@ -220,6 +220,16 @@ export async function run(opts, deps = {}) {
     teachBackGraded,
     tokenWeight,
     judgeFailure: judge.client ? { teachBack: teachBackGraded ? null : judgeFailure, reread: rereadFailure } : null,
+    // Configured = every reader the panel named, including any skipped for a
+    // missing key: the reader that never answered may be the one that would
+    // have blocked.
+    panel: {
+      configured: panel.length,
+      missing: [
+        ...results.filter((r) => !r.response).map((r) => ({ personaId: r.personaId, model: r.model, reason: r.error ?? "no reply" })),
+        ...skipped.map((s) => ({ personaId: s.personaId, model: s.model, reason: `skipped: ${s.reason}` })),
+      ],
+    },
   });
 
   const result = {
