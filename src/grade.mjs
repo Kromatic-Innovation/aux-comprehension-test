@@ -15,8 +15,9 @@
 //                  confusion cluster qualifies only when its tool also has at
 //                  least one misreading (from any reader).
 //   reader-error   tripped by exactly one reader, copy unambiguous on re-read
-//                  (or not re-read: no judge, or the judge failed -- the row
-//                  says which). Not a must-fix.
+//                  (or not re-read: no judge, the judge failed, or the spend
+//                  cap stopped the re-read -- the row says which). Not a
+//                  must-fix.
 //   structural     a tool whose purpose no reader recovered. Yields `fail`.
 //   informational  length-only complaints, token-weight flags, and
 //                  confusion-only clusters (no misreading of that tool),
@@ -28,8 +29,9 @@
 //   fail         any structural row.
 //   conditional  must-fix rows exist (each a copy edit), or `pass` is
 //                withheld (single-provider panel, fewer than two readers,
-//                fewer readers answered than the panel was configured for, or
-//                teach-back not graded because no judge was configured).
+//                fewer readers answered than the panel was configured for,
+//                teach-back not graded, or a configured judge left a
+//                single-reader row without a re-read verdict).
 //   pass         no must-fix rows, crossModel, two or more readers, graded.
 
 import { NO_TOOL } from "./inputs.mjs";
@@ -171,13 +173,15 @@ export function rereadCandidates(clusters) {
  * @param {{teachBack: string|null, reread: string|null}|null} [args.judgeFailure]
  *        null when no judge was configured; otherwise the failure reason (or
  *        null) for each judge job, so an errored judge is never labelled "no judge"
+ * @param {Map<string, string>|null} [args.rereadGaps]  cluster id -> why it has no
+ *        re-read verdict (its batch failed, or the spend cap stopped the re-read)
  * @param {{configured: number, missing: Array<{personaId, model, reason}>}|null} [args.panel]
  *        the configured panel size and every configured reader that returned no
  *        parseable verdict (failed or skipped), with why. When fewer readers
  *        answered than were configured, `pass` is withheld: the reader that went
  *        missing may be the one that would have blocked.
  */
-export function decide({ clusters, readers, rereads, teachBackGraded, tokenWeight, judgeFailure = null, panel = null }) {
+export function decide({ clusters, readers, rereads, teachBackGraded, tokenWeight, judgeFailure = null, rereadGaps = null, panel = null }) {
   const unverified = judgeFailure?.reread
     ? `unverified (judge failed: ${judgeFailure.reread})`
     : rereads
@@ -185,6 +189,9 @@ export function decide({ clusters, readers, rereads, teachBackGraded, tokenWeigh
       : "unverified (no judge)";
   const rows = [];
   const nReaders = readers.length;
+  // Single-reader rows, and how many the judge left without a verdict, by cause.
+  let singleRows = 0;
+  const unread = new Map();
   for (const c of clusters.values()) {
     const distinct = c.trippedBy.length;
     // A confusion cluster with no misreading of its tool. Clusters built by
@@ -198,7 +205,13 @@ export function decide({ clusters, readers, rereads, teachBackGraded, tokenWeigh
     else if (distinct >= 2) cls = confusionOnly ? "informational" : "must-fix";
     else {
       const rr = rereads?.get(c.id) ?? null;
-      reread = rr ? { ambiguous: rr.ambiguous, why: rr.why } : unverified;
+      const gap = rereadGaps?.get(c.id) ?? null;
+      singleRows += 1;
+      if (!rr) {
+        const cause = gap ?? (judgeFailure?.reread ? `judge failed: ${judgeFailure.reread}` : "judge returned no re-read for this row");
+        unread.set(cause, (unread.get(cause) ?? 0) + 1);
+      }
+      reread = rr ? { ambiguous: rr.ambiguous, why: rr.why } : gap ? `unverified (${gap})` : unverified;
       if (!(rr && rr.ambiguous)) cls = "reader-error";
       else if (confusionOnly) {
         cls = "informational";
@@ -239,6 +252,14 @@ export function decide({ clusters, readers, rereads, teachBackGraded, tokenWeigh
             "teach-back drift not graded (no reader answer to grade); pass requires a graded teach-back"
           : "teach-back drift not graded (no --judge); pass requires a judge, so grade readers/ side by side",
     );
+  }
+
+  // A configured judge left a single-reader row unverified. That row stays
+  // reader-error by default, so it may be hiding a must-fix.
+  const nUnread = [...unread.values()].reduce((a, b) => a + b, 0);
+  if (judgeFailure && nUnread > 0) {
+    const why = [...unread].map(([cause, n]) => `${n}: ${cause}`).join("; ");
+    withheld.push(`re-read incomplete: ${nUnread} of ${singleRows} single-reader rows unverified (${why}); pass requires every single-reader row re-read`);
   }
 
   let verdict;

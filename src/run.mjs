@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { getPersona, USAGE_HEADER } from "panelist";
 import { normalizePayload, parseTruth, checkTruthCoverage, normalizeRequests, gradedTruth } from "./inputs.mjs";
 import { registerReaderPersonas, buildPanel, parseModelSpec, renderReaderPrompt, runReader, DEFAULT_PERSONA_IDS } from "./reader.mjs";
-import { gradeTeachBack, reread, buildTeachBackPrompt, buildRereadPrompt, teachBackBatches } from "./judge.mjs";
+import { gradeTeachBack, reread, buildTeachBackPrompt, buildRereadPrompt, teachBackBatches, rereadBatchSize, rereadBatches } from "./judge.mjs";
 import { buildClusters, rereadCandidates, decide } from "./grade.mjs";
 import { measureTokenWeight, renderTokenWeightMd } from "./tokenweight.mjs";
 import { loadPrices, estimate, meter, actual } from "./cost.mjs";
@@ -138,7 +138,19 @@ export async function run(opts, deps = {}) {
         });
       });
     }
-    calls.push({ purpose: "judge re-read", model: pricedJudge, prompt: buildRereadPrompt(payload, []) + "x".repeat(8000), maxTokens: judgeMaxTokens });
+    // The re-read is batched too, and how many rows it gets is only known once
+    // the readers answer. Routing rows are keyed by request and teach-back rows
+    // by tool, so those are bounded; confusion rows are not, and are priced at
+    // one per tool. A run with more rows than that still never goes over:
+    // the spend is checked before every re-read call, and the re-read stops
+    // (withholding pass) rather than exceed --max-usd.
+    const nTools = Object.keys(truth.tools).length;
+    const bound = requests.length + 2 * nTools;
+    const fakeRow = { id: "x".repeat(40), tools: ["x".repeat(40)], about: "x".repeat(40), complaint: "x".repeat(400), defect: "x".repeat(120) };
+    const chunks = rereadBatches(Array.from({ length: bound }, () => fakeRow), rereadBatchSize(judgeMaxTokens));
+    chunks.forEach((rows, i) => {
+      calls.push({ purpose: `judge re-read (batch ${i + 1}/${chunks.length})`, model: pricedJudge, prompt: buildRereadPrompt(payload, rows), maxTokens: judgeMaxTokens });
+    });
   }
   let est;
   try {
@@ -201,15 +213,30 @@ export async function run(opts, deps = {}) {
   }
   const teachBackGraded = Boolean(judge.client) && judgeFailures.length === 0 && ok.length > 0;
   const clusters = buildClusters({ readers: ok, requests, truth, teachBackGrades, lengthBenchmark: opts.lengthBenchmark ?? null });
+  // Re-read of single-reader rows, in batches. A failed batch is recorded and
+  // the next one is still sent. Before each call, the spend so far plus that
+  // call's upper bound is checked against --max-usd, and the re-read stops
+  // rather than go over. Every row left without a verdict is named in
+  // rereadGaps with why, and withholds pass (grade.mjs).
   let rereads = null;
-  let rereadFailure = null;
+  const rereadGaps = new Map();
   if (judge.client) {
-    try {
-      rereads = await reread(meter(judge.client, ledger, "judge"), payload, rereadCandidates(clusters), { maxTokens: judgeMaxTokens });
-    } catch (err) {
-      judgeFailed("re-read", err);
-      rereadFailure = judgeFailures[judgeFailures.length - 1].reason;
-    }
+    rereads = await reread(meter(judge.client, ledger, "judge"), payload, rereadCandidates(clusters), {
+      maxTokens: judgeMaxTokens,
+      beforeBatch: ({ prompt }) => {
+        const spent = actual(ledger, prices).usd;
+        const next = estimate([{ purpose: "judge re-read", model: judge.model, prompt, maxTokens: judgeMaxTokens }], prices).usd;
+        if (spent + next <= opts.maxUsd) return null;
+        return `--max-usd ${opts.maxUsd} would be exceeded: ${spent.toFixed(4)} USD spent, next re-read call up to ${next.toFixed(4)} USD`;
+      },
+      onBatchError: (err, batch, i, n) => {
+        judgeFailed(n > 1 ? `re-read batch ${i + 1}/${n}` : "re-read", err);
+        for (const c of batch) rereadGaps.set(c.id, `judge failed: ${err.reason ?? err.message}`);
+      },
+      onStop: (reason, rows) => {
+        for (const c of rows) rereadGaps.set(c.id, `not re-read: ${reason}`);
+      },
+    });
   }
   const judgeFailure = judgeFailures.length ? failureSummary(judgeFailures) : null;
   const tokenWeight = await measureTokenWeight(payload);
@@ -219,7 +246,8 @@ export async function run(opts, deps = {}) {
     rereads,
     teachBackGraded,
     tokenWeight,
-    judgeFailure: judge.client ? { teachBack: teachBackGraded ? null : judgeFailure, reread: rereadFailure } : null,
+    judgeFailure: judge.client ? { teachBack: teachBackGraded ? null : judgeFailure, reread: null } : null,
+    rereadGaps,
     // Configured = every reader the panel named, including any skipped for a
     // missing key: the reader that never answered may be the one that would
     // have blocked.

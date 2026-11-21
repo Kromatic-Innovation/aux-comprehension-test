@@ -7,7 +7,10 @@
 //     payload never needs one huge reply that the output cap cuts off.
 //   reread: for complaints raised by exactly one reader, re-read the copy
 //     and say whether it is genuinely ambiguous (must-fix) or the reader
-//     misread unambiguous copy (reader error).
+//     misread unambiguous copy (reader error). Sent in batches sized from the
+//     output cap (rereadBatchSize), one call per batch, so a long list of
+//     complaints never needs one reply the cap cuts off. A failed batch does
+//     not stop the later ones: their rows can still be verified.
 //
 // With no judge configured the run emits the readings side by side for a
 // person to grade, and withholds `pass` (see grade.mjs).
@@ -106,14 +109,63 @@ export async function gradeTeachBack(client, truth, teachBack, { maxTokens = 409
   return out;
 }
 
-/** @returns {Promise<Map<string, {ambiguous: boolean, why: string}>>} */
-export async function reread(client, payload, complaints, { maxTokens = 2048 } = {}) {
+/**
+ * Output tokens budgeted per re-read row. A row in the prompt's format is
+ * ~50-80 tokens; the margin covers a judge that writes long `why`s.
+ */
+export const REREAD_TOKENS_PER_ROW = 300;
+
+/** Complaints per re-read call, so each reply fits under the output cap. */
+export function rereadBatchSize(maxTokens) {
+  return Math.max(1, Math.floor(maxTokens / REREAD_TOKENS_PER_ROW));
+}
+
+/** The complaints, split into the batches reread sends, in order. */
+export function rereadBatches(complaints, size) {
+  const out = [];
+  for (let i = 0; i < complaints.length; i += size) out.push(complaints.slice(i, i + size));
+  return out;
+}
+
+/**
+ * One call per batch. Rows the judge did not return a verdict for are simply
+ * absent from the Map; the caller counts them as unverified.
+ *
+ * @param {object} [opts]
+ *   @param {number} [opts.maxTokens=2048]
+ *   @param {number} [opts.batchSize]  default rereadBatchSize(maxTokens)
+ *   @param {function} [opts.beforeBatch]  ({prompt, batch}) -> null to send, or a
+ *          reason string to stop before sending this batch (and every later one)
+ *   @param {function} [opts.onBatchError] (err, batch, index, total) -> void. When given, a failed
+ *          batch is reported here and the next batch is still sent; without it
+ *          the first failure throws.
+ *   @param {function} [opts.onStop]  (reason, rows) -> void, with every row not sent
+ * @returns {Promise<Map<string, {ambiguous: boolean, why: string}>>}
+ */
+export async function reread(client, payload, complaints, { maxTokens = 2048, batchSize = rereadBatchSize(maxTokens), beforeBatch, onBatchError, onStop } = {}) {
   const out = new Map();
-  if (complaints.length === 0) return out;
-  const obj = await ask(client, buildRereadPrompt(payload, complaints), maxTokens);
-  for (const r of Array.isArray(obj.rereads) ? obj.rereads : []) {
-    if (r && typeof r.id === "string" && typeof r.ambiguous === "boolean") {
-      out.set(r.id, { ambiguous: r.ambiguous, why: typeof r.why === "string" ? r.why : "" });
+  const batches = rereadBatches(complaints, batchSize);
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i];
+    const prompt = buildRereadPrompt(payload, batch);
+    const stop = beforeBatch ? beforeBatch({ prompt, batch }) : null;
+    if (stop) {
+      onStop?.(stop, batches.slice(i).flat());
+      break;
+    }
+    let obj;
+    try {
+      obj = await ask(client, prompt, maxTokens);
+    } catch (err) {
+      if (!onBatchError) throw err;
+      onBatchError(err, batch, i, batches.length);
+      continue;
+    }
+    const wanted = new Set(batch.map((c) => c.id));
+    for (const r of Array.isArray(obj.rereads) ? obj.rereads : []) {
+      if (r && typeof r.id === "string" && wanted.has(r.id) && typeof r.ambiguous === "boolean") {
+        out.set(r.id, { ambiguous: r.ambiguous, why: typeof r.why === "string" ? r.why : "" });
+      }
     }
   }
   return out;

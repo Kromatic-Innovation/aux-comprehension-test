@@ -54,9 +54,12 @@ const words = (s) => new Set(String(s).toLowerCase().match(/[a-z]{5,}/g) ?? []);
  * least two significant words with the intended meaning. Re-read: every
  * single-reader complaint is judged unambiguous unless `ambiguousIds` names it.
  * `pad` adds that many chars of commentary per grade (a verbose judge);
+ * `rereadPad` does the same per re-read row; `dropIds` leaves those rows out of
+ * the re-read reply; `billOutput(prompt)` overrides the output tokens the
+ * call reports (a provider billing more than the reply shows);
  * `honourCap` cuts the reply off at the call's maxTokens, as a provider does.
  */
-export function scriptedJudge(model, { ambiguousIds = [], prompts, pad = 0, honourCap = false } = {}) {
+export function scriptedJudge(model, { ambiguousIds = [], prompts, pad = 0, rereadPad = 0, dropIds = [], billOutput = null, honourCap = false } = {}) {
   return {
     model,
     async complete({ prompt, maxTokens }) {
@@ -64,7 +67,11 @@ export function scriptedJudge(model, { ambiguousIds = [], prompts, pad = 0, hono
       let out;
       if (prompt.includes("COMPLAINTS:")) {
         const complaints = JSON.parse(prompt.slice(prompt.indexOf("COMPLAINTS:") + 11));
-        out = { rereads: complaints.map((c) => ({ id: c.id, ambiguous: ambiguousIds.includes(c.id), why: "scripted re-read" })) };
+        out = {
+          rereads: complaints
+            .filter((c) => !dropIds.includes(c.id))
+            .map((c) => ({ id: c.id, ambiguous: ambiguousIds.includes(c.id), why: "scripted re-read" + (rereadPad ? " " + "w".repeat(rereadPad) : "") })),
+        };
       } else {
         const items = JSON.parse(prompt.slice(prompt.indexOf("ITEMS:") + 6));
         out = {
@@ -83,7 +90,8 @@ export function scriptedJudge(model, { ambiguousIds = [], prompts, pad = 0, hono
         text = text.slice(0, maxTokens * 4);
         stop = "max_tokens";
       }
-      return { ok: true, text, model, stopReason: stop, usage: { inputTokens: Math.ceil(prompt.length / 4), outputTokens: Math.ceil(text.length / 4) } };
+      const outputTokens = billOutput?.(prompt) ?? Math.ceil(text.length / 4);
+      return { ok: true, text, model, stopReason: stop, usage: { inputTokens: Math.ceil(prompt.length / 4), outputTokens } };
     },
   };
 }
