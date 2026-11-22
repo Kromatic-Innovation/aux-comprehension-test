@@ -12,6 +12,10 @@
   `cost.reread`, says `cost.reread` is `null` when no judge is configured,
   and shows the current `version`. § Cost says the same
   ([#54](https://github.com/Kromatic-Innovation/aux-comprehension-test/issues/54)).
+- `run()` with a `judgeMaxTokens` that is not a number now names its type in
+  the refusal: `got "300" (string)`, not `got 300`, which read like a valid
+  value. A string is still refused
+  ([#55](https://github.com/Kromatic-Innovation/aux-comprehension-test/issues/55)).
 
 ## [0.2.1] - 2026-11-22
 
