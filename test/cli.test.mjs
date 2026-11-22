@@ -385,6 +385,12 @@ test("run() names the type when judgeMaxTokens is not a number, so \"300\" does 
     run({ ...opts, judgeMaxTokens: "300" }, deps()),
     (e) => e instanceof RunError && e.code === "USAGE" && /got "300" \(string\)/.test(e.message),
   );
+  // A value with no JSON form (BigInt, a circular object) is still a USAGE refusal, not a TypeError.
+  const circular = {};
+  circular.self = circular;
+  for (const [bad, shown] of [[300n, /got 300 \(bigint\)/], [circular, /got \[object Object\] \(object\)/]]) {
+    await assert.rejects(run({ ...opts, judgeMaxTokens: bad }, deps()), (e) => e instanceof RunError && e.code === "USAGE" && shown.test(e.message), typeof bad);
+  }
   // Control: a refused number is quoted bare, with no type.
   await assert.rejects(run({ ...opts, judgeMaxTokens: 299 }, deps()), (e) => e instanceof RunError && /got 299: /.test(e.message));
 });
