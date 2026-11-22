@@ -36,16 +36,14 @@ host, a cautious agent, a technical-term searcher and a literal reader.
 Requires Node 20 or later.
 
 ```bash
-# Works today, before the first npm release:
-npm install -g github:Kromatic-Innovation/aux-comprehension-test
-
-# Works once 0.1.0 is on npm:
 npm install -g aux-comprehension-test
+
+# Or the unreleased tip of develop:
+npm install -g github:Kromatic-Innovation/aux-comprehension-test#develop
 ```
 
-`aux-comprehension-test` is **not on npm yet**. The `github:` form is the one
-that works today; it installs the same package contents as the npm release
-will. 0.1.0 publishes from a reviewed `v0.1.0` tag.
+Releases publish to npm from reviewed `vX.Y.Z` tags, with provenance. See
+`CHANGELOG.md` for what each version changed.
 
 Running from a git checkout instead? Run `npm ci` in it first.
 
