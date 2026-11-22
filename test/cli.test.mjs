@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { main, EXIT } from "../src/cli.mjs";
 import { FIXTURES, mockClientFor, resetRegistry, TEST_PRICES } from "./_mock.mjs";
 import { miniReader } from "./_mini.mjs";
-import { readmeFirstRunArgv } from "./_readme.mjs";
+import { readmeFirstRunArgv, readmeCommandAndOutput } from "./_readme.mjs";
 
 beforeEach(resetRegistry);
 
@@ -139,6 +139,20 @@ test("the README's first run works with no provider key and spends nothing", asy
   // The estimate is a real number priced off the bundled table, not zero.
   const usd = Number(stdout.text.match(/\$(\d+\.\d{4})/)[1]);
   assert.ok(usd > 0 && usd <= 1, `estimate ${usd} should be >0 and within the ceiling`);
+});
+
+test("the README's --judge first-run command prints exactly the sample output shown under it", async () => {
+  const { argv, output } = readmeCommandAndOutput("With `--judge`");
+  const at = argv.indexOf("--judge");
+  assert.ok(at > 0 && argv[at + 1], "the README's judge command must name a judge model");
+  const { models } = JSON.parse(readFileSync(new URL("../data/prices.json", import.meta.url), "utf8"));
+  assert.ok(models[argv[at + 1]], `judge ${argv[at + 1]} is not priced in data/prices.json`);
+  assert.ok(argv.includes("--estimate-only"));
+  const stdout = sink();
+  const stderr = sink();
+  // The real clients and the real bundled prices, with no key: what a reader gets.
+  assert.equal(await main(argv, { env: {}, stdout, stderr }), 0, stderr.text);
+  assert.equal(stderr.text + stdout.text, output);
 });
 
 test("--estimate-only prices the whole panel, so a missing key does not change the number", async () => {

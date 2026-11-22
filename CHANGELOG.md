@@ -21,6 +21,10 @@
   paths) after the global one, for a project that ran
   `npm install aux-comprehension-test`
   ([#56](https://github.com/Kromatic-Innovation/aux-comprehension-test/issues/56)).
+- README § First run shows the full `--estimate-only --judge claude-sonnet-4-6`
+  command above its sample estimate, and the sample is that command's full
+  output. A test runs the README's command and checks the sample against it
+  ([#57](https://github.com/Kromatic-Innovation/aux-comprehension-test/issues/57)).
 
 ## [0.2.1] - 2026-11-22
 
