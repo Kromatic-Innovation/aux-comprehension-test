@@ -48,7 +48,7 @@ test("the README's first run exits 0 against an unpacked tarball", () => {
   for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "XAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"]) delete env[k];
   // execFileSync throws on a non-zero exit, so returning at all means exit 0.
   const out = execFileSync(process.execPath, [join(pkg, "bin/aux-comprehension-test.mjs"), ...argv], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  assert.match(out, /estimated spend \(upper bound\): \$\d+\.\d{4} over 4 call\(s\)/);
+  assert.match(out, /estimated spend: \$\d+\.\d{4} over 4 call\(s\)\n  readers \(upper bound\): \$\d+\.\d{4} over 4 call\(s\)/);
   assert.match(out, /no model was called; nothing was spent\./);
 });
 

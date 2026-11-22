@@ -116,6 +116,7 @@ export async function run(opts, deps = {}) {
   }
 
   // Pre-run estimate: the exact reader prompts, full output caps.
+  let rereadRowsAssumed = null;
   const priced = opts.estimateOnly ? panel.map((reader) => ({ reader })) : active;
   const pricedJudge = opts.estimateOnly ? (judgeSpec?.model ?? null) : judge.model;
   const calls = priced.map(({ reader }) => ({
@@ -141,13 +142,15 @@ export async function run(opts, deps = {}) {
     // The re-read is batched too, and how many rows it gets is only known once
     // the readers answer. Routing rows are keyed by request and teach-back rows
     // by tool, so those are bounded; confusion rows are not, and are priced at
-    // one per tool. A run with more rows than that still never goes over:
-    // the spend is checked before every re-read call, and the re-read stops
-    // (withholding pass) rather than exceed --max-usd.
+    // one per tool. So this part is an ESTIMATE, not an upper bound: a run
+    // with more rows than it assumed spends more on the re-read than shown
+    // here, and the run reports rows assumed vs. rows sent (cost.reread). It
+    // still never goes over --max-usd: the spend is checked before every
+    // re-read call, and the re-read stops (withholding pass) rather than exceed it.
     const nTools = Object.keys(truth.tools).length;
-    const bound = requests.length + 2 * nTools;
+    rereadRowsAssumed = requests.length + 2 * nTools;
     const fakeRow = { id: "x".repeat(40), tools: ["x".repeat(40)], about: "x".repeat(40), complaint: "x".repeat(400), defect: "x".repeat(120) };
-    const chunks = rereadBatches(Array.from({ length: bound }, () => fakeRow), rereadBatchSize(judgeMaxTokens));
+    const chunks = rereadBatches(Array.from({ length: rereadRowsAssumed }, () => fakeRow), rereadBatchSize(judgeMaxTokens));
     chunks.forEach((rows, i) => {
       calls.push({ purpose: `judge re-read (batch ${i + 1}/${chunks.length})`, model: pricedJudge, prompt: buildRereadPrompt(payload, rows), maxTokens: judgeMaxTokens });
     });
@@ -158,6 +161,7 @@ export async function run(opts, deps = {}) {
   } catch (err) {
     throw new RunError("REFUSED", err.message);
   }
+  est.parts = estimateParts(est, rereadRowsAssumed);
   if (est.usd > opts.maxUsd) {
     throw new RunError(
       "REFUSED",
@@ -220,8 +224,11 @@ export async function run(opts, deps = {}) {
   // rereadGaps with why, and withholds pass (grade.mjs).
   let rereads = null;
   const rereadGaps = new Map();
+  let rereadReport = null;
   if (judge.client) {
-    rereads = await reread(meter(judge.client, ledger, "judge"), payload, rereadCandidates(clusters), {
+    const candidates = rereadCandidates(clusters);
+    let rowsStopped = 0;
+    rereads = await reread(meter(judge.client, ledger, "judge"), payload, candidates, {
       maxTokens: judgeMaxTokens,
       beforeBatch: ({ prompt }) => {
         const spent = actual(ledger, prices).usd;
@@ -234,9 +241,11 @@ export async function run(opts, deps = {}) {
         for (const c of batch) rereadGaps.set(c.id, `judge failed: ${err.reason ?? err.message}`);
       },
       onStop: (reason, rows) => {
+        rowsStopped = rows.length;
         for (const c of rows) rereadGaps.set(c.id, `not re-read: ${reason}`);
       },
     });
+    rereadReport = rereadRowReport(rereadRowsAssumed, candidates.length, candidates.length - rowsStopped);
   }
   const judgeFailure = judgeFailures.length ? failureSummary(judgeFailures) : null;
   const tokenWeight = await measureTokenWeight(payload);
@@ -283,7 +292,7 @@ export async function run(opts, deps = {}) {
       failures: judgeFailures.map(({ raw, ...f }) => f),
     },
     lengthBenchmark: opts.lengthBenchmark ?? null,
-    cost: { maxUsd: opts.maxUsd, estimate: est, actual: actual(ledger, prices) },
+    cost: { maxUsd: opts.maxUsd, estimate: est, actual: actual(ledger, prices), reread: rereadReport },
     tokenWeight: {
       label: tokenWeight.label,
       method: tokenWeight.method,
@@ -296,6 +305,33 @@ export async function run(opts, deps = {}) {
 
   if (opts.out) writeOutputs(opts.out, result, results, tokenWeight, judgeFailures);
   return result;
+}
+
+/**
+ * Split an estimate into the part that is an upper bound (reader calls and
+ * teach-back judge calls: every prompt is known before the run) and the
+ * re-read part, which is priced for `rowsAssumed` rows and is only an estimate.
+ * `reread` is null when no judge is priced (there is no re-read to estimate).
+ */
+export function estimateParts(est, rowsAssumed) {
+  const isReread = (c) => c.purpose.startsWith("judge re-read");
+  const sum = (rows) => rows.reduce((s, r) => s + r.usd, 0);
+  const bounded = est.calls.filter((c) => !isReread(c));
+  const rr = est.calls.filter(isReread);
+  return {
+    bounded: { usd: sum(bounded), calls: bounded.length },
+    reread: rowsAssumed == null ? null : { usd: sum(rr), calls: rr.length, rowsAssumed },
+  };
+}
+
+/**
+ * The re-read's row count against what the estimate assumed. `rows` is every
+ * single-reader row due a re-read; `rowsSent` excludes rows the spend cap kept
+ * back. `overAssumed` is true when the run had more rows than the estimate
+ * priced, so the re-read part of the estimate understated it.
+ */
+export function rereadRowReport(rowsAssumed, rows, rowsSent) {
+  return { rowsAssumed, rows, rowsSent, overAssumed: rowsAssumed != null && rows > rowsAssumed };
 }
 
 /** A short cause for row labels: the first failure, plus how many more. */

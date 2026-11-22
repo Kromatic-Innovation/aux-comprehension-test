@@ -73,6 +73,27 @@ const OPTIONS = {
   help: { type: "boolean", short: "h" },
 };
 
+/**
+ * The estimate's two parts. Readers and teach-back are an upper bound: every
+ * prompt is known before the run. The re-read is not: its row count is only
+ * known once the readers answer, so it is priced for an assumed row count.
+ */
+export function estimatePartLines(est) {
+  const p = est.parts;
+  if (!p) return "";
+  const head = p.reread ? "readers + teach-back" : "readers";
+  let out = `  ${head} (upper bound): $${p.bounded.usd.toFixed(4)} over ${p.bounded.calls} call(s)\n`;
+  if (p.reread) {
+    out += `  re-read (estimated, ${p.reread.rowsAssumed} rows assumed): $${p.reread.usd.toFixed(4)} over ${p.reread.calls} call(s); more rows cost more, up to --max-usd\n`;
+  }
+  return out;
+}
+
+/** One line for a run whose re-read had more rows than the estimate assumed. */
+export function rereadOverLine(r) {
+  return `re-read: ${r.rows} rows, ${r.rowsAssumed} assumed by the estimate (${r.rowsSent} sent); the re-read part of the estimate was exceeded`;
+}
+
 const list = (s) => (s ? s.split(",").map((x) => x.trim()).filter(Boolean) : undefined);
 
 /**
@@ -167,7 +188,8 @@ export async function main(argv, { env = process.env, stdout = process.stdout, s
   if (result.status === "estimate") {
     const readyJudge = result.priced.judge ? (result.runnable.judge ? "" : " (no key yet)") : "";
     stdout.write(
-      `estimated spend (upper bound): $${result.estimate.usd.toFixed(4)} over ${result.estimate.calls.length} call(s)\n` +
+      `estimated spend: $${result.estimate.usd.toFixed(4)} over ${result.estimate.calls.length} call(s)\n` +
+        estimatePartLines(result.estimate) +
         `priced: ${result.priced.readers} reader(s)${result.priced.judge ? ` + judge ${result.priced.judge}${readyJudge}` : ""}, ceiling $${maxUsd}\n` +
         `runnable now: ${result.runnable.readers} of ${result.priced.readers} reader(s) have a key\n` +
         `no model was called; nothing was spent.\n`,
@@ -180,6 +202,7 @@ export async function main(argv, { env = process.env, stdout = process.stdout, s
       `${g.counts.readerError} reader-error, ${g.counts.informational} informational)\n` +
       (g.withheldPass.length ? `pass withheld: ${g.withheldPass.join("; ")}\n` : "") +
       `spend: $${result.cost.actual.usd.toFixed(4)} actual, $${result.cost.estimate.usd.toFixed(4)} estimated, ceiling $${maxUsd}\n` +
+      (result.cost.reread?.overAssumed ? `${rereadOverLine(result.cost.reread)}\n` : "") +
       `wrote ${opts.out}/verdict.md\n`,
   );
   return EXIT[g.verdict];

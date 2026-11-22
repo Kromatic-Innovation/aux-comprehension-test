@@ -60,7 +60,7 @@ is a breaking change until this package widens the range.
 
 Ask for the estimate instead of the run. `--estimate-only` reads your real
 inputs, builds the real reader prompts, prices them against the bundled table,
-and prints the upper bound — without calling any model and without needing a
+and prints the estimate — without calling any model and without needing a
 provider key:
 
 ```bash
@@ -78,7 +78,8 @@ SKIPPED reader small-context-host x claude-haiku-4-5: ANTHROPIC_API_KEY is not s
 SKIPPED reader cautious-agent x gpt-5: OPENAI_API_KEY is not set
 SKIPPED reader technical-term-searcher x claude-haiku-4-5: ANTHROPIC_API_KEY is not set
 SKIPPED reader literal-reader x gpt-5: OPENAI_API_KEY is not set
-estimated spend (upper bound): $0.2605 over 4 call(s)
+estimated spend: $0.2605 over 4 call(s)
+  readers (upper bound): $0.2605 over 4 call(s)
 priced: 4 reader(s), ceiling $1
 runnable now: 0 of 4 reader(s) have a key
 no model was called; nothing was spent.
@@ -87,6 +88,16 @@ no model was called; nothing was spent.
 Missing keys are reported, not fatal: the estimate covers the whole panel your
 command line names, so the number does not change when you add a key. Exit
 code is 0.
+
+With `--judge`, the estimate has a second part. The reader and teach-back calls
+stay an upper bound; the re-read is only an estimate, because its row count is
+not known until the readers answer (see [Cost](#cost)):
+
+```
+estimated spend: $0.9067 over 9 call(s)
+  readers + teach-back (upper bound): $0.8254 over 8 call(s)
+  re-read (estimated, 10 rows assumed): $0.0813 over 1 call(s); more rows cost more, up to --max-usd
+```
 
 The paths above are the small example payload that ships in the package, under
 `examples/mini/` of the global install. From a git checkout, use
@@ -278,9 +289,11 @@ or an explicit `provider:` prefix). A single-provider panel can never pass.
 ## Cost
 
 `--max-usd` is required and has no default. Before any model is called, the
-CLI estimates an upper bound on spend (the exact prompt each call will send, at
-chars / 4 tokens, plus each call's full output cap and the input of its maximum
-retries) and refuses to start if the estimate is over the ceiling. A model with no known price also refuses the run:
+CLI estimates spend (the exact prompt each call will send, at chars / 4 tokens,
+plus each call's full output cap and the input of its maximum retries) and
+refuses to start if the estimate is over the ceiling. For the reader calls and
+the teach-back judge calls this is an upper bound. The re-read part is not (see
+below), so the total is not one either when a judge is configured. A model with no known price also refuses the run:
 it is never priced at zero. The bundled table in `data/prices.json` covers
 current Anthropic models and OpenAI `gpt-5` (standard tier). Each provider's
 entry under that file's `sources` block records the pricing page the numbers
@@ -288,15 +301,22 @@ were verified against and the date they were read, so a stale table is visible
 rather than silent. A price entry can carry one prompt-length tier,
 `"above": { "tokens": N, "input": ..., "output": ... }`: a call whose
 approximate input tokens are over `N` is priced at the `above` rates, in the
-estimate and in the actual spend, so the estimate stays an upper bound.
+estimate and in the actual spend, so the tier never makes the estimate understate a call.
 `claude-haiku-5-5` is bundled this way (0.1 / 0.5 up to 100,000 input tokens,
 0.5 / 2.5 above). An `above` tier that is missing a field is treated as
 unpriced and refuses the run.
 The re-read's row count is only known once the readers answer, so the estimate
 prices it for one row per request plus two per tool (routing, teach-back and
-one confusion row per tool). A run that produces more rows than that still
-never goes over the ceiling: spend is checked again before every re-read call,
-and the re-read stops, withholding `pass`, rather than exceed `--max-usd`.
+one confusion row per tool). Confusion rows have no real bound, so this part is
+an estimate, printed separately with the number of rows it assumed. A run that
+produces more rows than that spends more on the re-read than the estimate
+showed, and says so: `verdict.json`'s `cost.reread` carries `rowsAssumed`,
+`rows` (rows due a re-read), `rowsSent` and `overAssumed`, and `verdict.md`
+prints the same counts. It still never goes over the ceiling: spend is checked
+again before every re-read call, and the re-read stops, withholding `pass`,
+rather than exceed `--max-usd`. So a `--max-usd` set equal to the estimate can
+end `conditional` with "re-read incomplete"; leave headroom above the re-read
+part if you want the whole re-read.
 Prices match the exact id or a `-YYYYMMDD` / `@...` snapshot of it only, so
 `gpt-5-pro`, `gpt-5-mini` and dashed-date snapshots are unpriced until you add
 them. Pass `--prices <file>` for any other model:
@@ -312,7 +332,7 @@ timeout, is not retried. A call that still fails is reported on that reader and
 the run continues. Each retried attempt is counted in actual spend at its full
 input and no output, since the provider reports no usage for it, and the
 estimate counts that worst case (two retried attempts) for every call, so the
-estimate stays an upper bound when calls are retried.
+estimate never understates a call that is retried.
 
 Prices are USD per million tokens. Check them against your provider before
 relying on an estimate. Actual usage is reported in `verdict.json` at the end.
