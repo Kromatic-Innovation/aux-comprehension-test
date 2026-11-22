@@ -312,7 +312,8 @@ an estimate, printed separately with the number of rows it assumed. A run that
 produces more rows than that spends more on the re-read than the estimate
 showed, and says so: `verdict.json`'s `cost.reread` carries `rowsAssumed`,
 `rows` (rows due a re-read), `rowsSent` and `overAssumed`, and `verdict.md`
-prints the same counts. It still never goes over the ceiling: spend is checked
+prints the same counts. With no judge configured there is no re-read, and
+`cost.reread` is `null`. It still never goes over the ceiling: spend is checked
 again before every re-read call, and the re-read stops, withholding `pass`,
 rather than exceed `--max-usd`. So a `--max-usd` set equal to the estimate can
 end `conditional` with "re-read incomplete"; leave headroom above the re-read
@@ -438,7 +439,7 @@ A completed run resolves to the object written to `verdict.json`:
 {
   status: "completed",
   tool: "aux-comprehension-test",
-  version: "0.1.0",
+  version: "0.2.2",
   grade: {
     verdict: "pass" | "conditional" | "fail",
     crossModel: true,                 // readers came from two or more providers
@@ -451,7 +452,12 @@ A completed run resolves to the object written to `verdict.json`:
   skipped: [{ personaId, model, provider, reason }],   // readers with no key
   judge: { model, skipped, errors, failures: [{ purpose, reason, stopReason, file? }] },
   lengthBenchmark,                    // the option, echoed, or null
-  cost: { maxUsd, estimate: { usd, maxRetries, calls }, actual: { usd, approximate, retries, calls } },
+  cost: {
+    maxUsd,
+    estimate: { usd, maxRetries, calls, parts: { bounded: { usd, calls }, reread: { usd, calls, rowsAssumed } | null } },
+    actual: { usd, approximate, retries, calls },
+    reread: { rowsAssumed, rows, rowsSent, overAssumed } | null, // null when no judge is configured
+  },
   tokenWeight: { label, method, total: { bytes, tokens }, instructions?: { bytes, tokens }, flags },
   honesty: [ /* panelist's usage header, then HOST_CAVEAT */ ],
 }
@@ -460,6 +466,10 @@ A completed run resolves to the object written to `verdict.json`:
 `cutList[].class` is `structural`, `must-fix`, `reader-error` or
 `informational`, in that order. Each `readers[].file` is the path, relative to
 `out`, of that reader's verbatim answer.
+
+`cost.reread` and `cost.estimate.parts.reread` are `null` when no judge is
+configured (no `judge` option, or a judge skipped for a missing key): there is
+no re-read. Check for `null` before reading `cost.reread.overAssumed`.
 
 With `estimateOnly: true`, `run` resolves instead to
 `{ status: "estimate", estimate, skipped, judge: { model, skipped },
