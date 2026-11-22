@@ -73,6 +73,13 @@ aux-comprehension-test run \
   --estimate-only
 ```
 
+`npm root -g` is npm's global package directory. Installed globally with a
+different package manager? Its packages live elsewhere, so swap in that
+manager's directory: `$(pnpm root -g)` for `pnpm add -g`, or
+`$(yarn global dir)/node_modules` for `yarn global add` (Yarn 1). Under nvm,
+`npm root -g` follows the active Node version, so run the command with the
+version you installed under.
+
 Installed locally instead (`npm install aux-comprehension-test` in a project)?
 Run this from that project's directory. `npx` finds the local CLI, and the
 example sits under `node_modules`:
@@ -101,9 +108,13 @@ runnable now: 0 of 4 reader(s) have a key
 no model was called; nothing was spent.
 ```
 
-Missing keys are reported, not fatal: the estimate covers the whole panel your
-command line names, so the number does not change when you add a key. Exit
-code is 0.
+That sample is what you see with no provider key set. Missing keys are
+reported, not fatal, so the `SKIPPED` lines and the `runnable now: N of 4`
+count depend on which keys are set: with only `ANTHROPIC_API_KEY` set, the two
+`gpt-5` readers are skipped and the count reads `runnable now: 2 of 4`; with
+both keys set, nothing is skipped and it reads `4 of 4`. The estimate does not
+change: it covers the whole panel your command line names, whichever keys you
+have. Exit code is 0.
 
 With `--judge`, the estimate has a second part. The reader and teach-back calls
 stay an upper bound; the re-read is only an estimate, because its row count is
