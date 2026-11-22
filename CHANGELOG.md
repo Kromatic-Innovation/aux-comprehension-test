@@ -3,12 +3,18 @@
 ## [0.2.0] - 2026-11-22
 
 The judge is more trustworthy on large payloads, and `pass` is withheld in two
-more cases where the run could not prove it. Behaviour change: a run that
-passed on 0.1.0 can come back `conditional` on 0.2.0 if a reader failed to
-answer or a single-reader re-read did not complete. `withheldPass` says which
-case applied. No breaking API change. No experimental surface added. No
-security-relevant change. To upgrade, install the new version. No flags or
-inputs need to change.
+more cases where the run could not prove it.
+
+- **Behaviour change.** A run that passed on 0.1.0 can come back
+  `conditional` on 0.2.0 if a reader failed to answer or a single-reader
+  re-read did not complete. `withheldPass` says which case applied.
+- **Data sent to the judge.** The teach-back judge now receives each tool's
+  payload entry and the server instructions on every grading call. Before,
+  it received them only on the re-read. If your payload is confidential,
+  note that it now reaches the judge model's provider on every call. Judge
+  input cost rises accordingly.
+- No breaking API change. No experimental surface added. To upgrade, install
+  the new version. No flags or inputs need to change.
 
 ### Added
 
@@ -29,6 +35,8 @@ inputs need to change.
   re-read stops rather than go over. Any row left without a verdict withholds
   `pass`, with the count and the cause. The pre-run estimate prices several
   re-read batches instead of one (#35).
+- The README install section now shows the published npm package first.
+- CI: `actions/create-github-app-token` bumped to v3.3.0.
 
 ### Fixed
 
