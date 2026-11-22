@@ -14,12 +14,25 @@ export const README_INSTALL_PREFIX = '"$(npm root -g)/aux-comprehension-test/';
  * documented first run and the tested first run cannot drift apart.
  */
 export function readmeFirstRunArgv(pkgRoot = new URL("../", import.meta.url)) {
+  return readmeCommandAndOutput("## First run", pkgRoot).argv;
+}
+
+/**
+ * The first fenced bash command after the README line starting with `marker`,
+ * as an argv (paths resolved as in readmeFirstRunArgv), plus the text of the
+ * plain fenced block that follows it: the sample output the README shows for
+ * that command.
+ */
+export function readmeCommandAndOutput(marker, pkgRoot = new URL("../", import.meta.url)) {
   const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
-  const start = readme.indexOf("## First run");
-  assert.ok(start > 0, "README.md has no '## First run' heading");
+  const start = readme.indexOf(`\n${marker}`) + 1;
+  assert.ok(start > 0, `README.md has no line starting '${marker}'`);
   const fence = readme.indexOf("```bash", start);
-  assert.ok(fence > 0, "no fenced bash block under README.md's '## First run'");
-  const body = readme.slice(fence + "```bash".length, readme.indexOf("```", fence + 7));
+  assert.ok(fence > 0, `no fenced bash block under README.md's '${marker}'`);
+  const end = readme.indexOf("```", fence + 7);
+  const body = readme.slice(fence + "```bash".length, end);
+  const outFence = readme.indexOf("```\n", end + 3);
+  const output = outFence < 0 ? null : readme.slice(outFence + 4, readme.indexOf("\n```", outFence + 4) + 1);
   const PKG = "\u0000pkg/";
   const tokens = body
     .split(README_INSTALL_PREFIX)
@@ -28,10 +41,11 @@ export function readmeFirstRunArgv(pkgRoot = new URL("../", import.meta.url)) {
     .trim()
     .split(/\s+/)
     .map((t) => (t.startsWith(PKG) ? t.replace(/"$/, "") : t));
-  assert.equal(tokens[0], "aux-comprehension-test", `first-run block does not invoke the CLI: ${tokens[0]}`);
+  assert.equal(tokens[0], "aux-comprehension-test", `block under '${marker}' does not invoke the CLI: ${tokens[0]}`);
   const root = pkgRoot instanceof URL ? pkgRoot : pathToFileURL(pkgRoot.endsWith("/") ? pkgRoot : `${pkgRoot}/`);
-  return tokens.slice(1).map((t) => {
+  const argv = tokens.slice(1).map((t) => {
     if (!t.startsWith(PKG)) return t;
     return fileURLToPath(new URL(t.slice(PKG.length), root));
   });
+  return { argv, output };
 }
