@@ -357,12 +357,13 @@ than the estimate showed. `cost.reread` records that too: `inputCharsAssumed`
 (the input characters of the re-read calls the estimate priced), `inputChars`
 (the input characters of the re-read calls the run's rows needed, sent or not)
 and `inputOverAssumed` (true when `inputChars` is the larger), and the CLI
-summary prints a `re-read input:` line when it is true. With no judge
-configured there is no re-read, and `cost.reread` is `null`. It still never goes over the ceiling: spend is checked
-again before every re-read call, and the re-read stops, withholding `pass`,
-rather than exceed `--max-usd`. So a `--max-usd` set equal to the estimate can
-end `conditional` with "re-read incomplete"; leave headroom above the re-read
-part if you want the whole re-read.
+summary prints a `re-read input:` line when it is true. The re-read still
+never goes over the ceiling: spend is checked again before every re-read call,
+and the re-read stops, withholding `pass`, rather than exceed `--max-usd`. So a
+`--max-usd` set equal to the estimate can end `conditional` with "re-read
+incomplete"; leave headroom above the re-read part if you want the whole
+re-read. With no judge configured there is no re-read, and `cost.reread` is
+`null`.
 Prices match the exact id or a `-YYYYMMDD` / `@...` snapshot of it only, so
 `gpt-5-pro`, `gpt-5-mini` and dashed-date snapshots are unpriced until you add
 them. Pass `--prices <file>` for any other model:
