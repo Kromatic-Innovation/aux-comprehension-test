@@ -130,6 +130,23 @@ export async function gradeTeachBack(client, truth, teachBack, { maxTokens = 409
  */
 export const REREAD_TOKENS_PER_ROW = 300;
 
+/**
+ * The smallest judge output cap a run accepts (`judgeMaxTokens`,
+ * `--judge-max-tokens`): room for one re-read row. Below it even a single-row
+ * re-read reply can be cut off, so every batch could fail and come back
+ * unverified while each one is still paid for.
+ */
+export const MIN_JUDGE_MAX_TOKENS = REREAD_TOKENS_PER_ROW;
+
+/** Why a judge output cap is refused, or null when it is usable. */
+export function judgeMaxTokensProblem(n, shown = n) {
+  if (Number.isInteger(n) && n >= MIN_JUDGE_MAX_TOKENS) return null;
+  return (
+    `must be an integer of at least ${MIN_JUDGE_MAX_TOKENS}, got ${shown}: the judge needs ${REREAD_TOKENS_PER_ROW} output tokens ` +
+    `for one re-read row, and below that even a single-row reply can be cut off`
+  );
+}
+
 /** Complaints per re-read call, so each reply fits under the output cap. */
 export function rereadBatchSize(maxTokens) {
   return Math.max(1, Math.floor(maxTokens / REREAD_TOKENS_PER_ROW));

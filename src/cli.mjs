@@ -14,6 +14,7 @@ import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { run, RunError, VERSION } from "./run.mjs";
 import { loadPrices } from "./cost.mjs";
+import { judgeMaxTokensProblem, MIN_JUDGE_MAX_TOKENS } from "./judge.mjs";
 
 export const EXIT = { pass: 0, conditional: 1, fail: 2, refused: 3, usage: 64, internal: 70 };
 
@@ -38,8 +39,9 @@ Options:
   --personas <list>     reader personas (default: all bundled)
   --readers <N>         cap the number of readers
   --max-tokens <N>      reader output cap (default 8192)
-  --judge-max-tokens <N>  judge output cap per call (default 4096); also sizes the re-read batches,
-                        and the pre-run estimate and --max-usd check price every judge call at it
+  --judge-max-tokens <N>  judge output cap per call (default 4096, minimum ${MIN_JUDGE_MAX_TOKENS}: room for one
+                        re-read row); also sizes the re-read batches, and the pre-run estimate and
+                        --max-usd check price every judge call at it
   --prices <file>       price overrides {"models": {"<id>": {"input": usd/Mtok, "output": usd/Mtok}}}
   --length-benchmark <file>  {materiallyLonger, correlatesWithLowerSelection, source}; only both true promotes length complaints
   --estimate-only       print the pre-run estimate and exit without calling any model.
@@ -135,8 +137,9 @@ export async function main(argv, { env = process.env, stdout = process.stdout, s
   let judgeMaxTokens;
   if (v["judge-max-tokens"] !== undefined) {
     judgeMaxTokens = Number(v["judge-max-tokens"]);
-    if (!Number.isInteger(judgeMaxTokens) || judgeMaxTokens <= 0) {
-      stderr.write("--judge-max-tokens must be a positive integer\n");
+    const problem = judgeMaxTokensProblem(judgeMaxTokens, v["judge-max-tokens"]);
+    if (problem) {
+      stderr.write(`--judge-max-tokens ${problem}\n`);
       return EXIT.usage;
     }
   }

@@ -82,8 +82,9 @@ test("cut-off reply: rows say judge failed (not no judge) and the raw reply is k
   const out = mkdtempSync(join(tmpdir(), "act-judge-"));
   const res = await runMini({
     script: miniReader({ confusion: { "small-context-host": [MISREAD] } }),
-    judgeClient: scriptedJudge("claude-sonnet-4-6", { pad: 400, honourCap: true }),
-    judgeMaxTokens: 20,
+    // Replies far over the smallest accepted cap, so both judge jobs are cut off.
+    judgeClient: scriptedJudge("claude-sonnet-4-6", { pad: 2000, rereadPad: 2000, honourCap: true }),
+    judgeMaxTokens: 300,
     out,
   });
   assert.ok(res.judge.failures.length > 0);

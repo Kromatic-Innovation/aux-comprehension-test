@@ -413,7 +413,7 @@ them; `run` reads no files and parses no paths itself.
 | `personas` | `string[]` of reader persona ids | no | all bundled personas | `--personas` |
 | `maxReaders` | number: cap on panel size | no | no cap | `--readers` |
 | `maxTokens` | number: reader output cap | no | `8192` | `--max-tokens` |
-| `judgeMaxTokens` | number: judge output cap | no | `4096` | `--judge-max-tokens` |
+| `judgeMaxTokens` | integer: judge output cap, at least `300` (room for one re-read row; a smaller value refuses the run) | no | `4096` | `--judge-max-tokens` |
 | `prices` | flat map `{ <id>: { input, output, above? } }`, USD per million tokens (no `models` wrapper) | no | the bundled `data/prices.json` table | `--prices` (merged over the bundled table) |
 | `lengthBenchmark` | `{ materiallyLonger, correlatesWithLowerSelection, source }` | no | `null` | `--length-benchmark` |
 | `out` | directory path to write outputs into | no | write nothing | `--out` |
