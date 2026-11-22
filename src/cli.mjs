@@ -38,6 +38,8 @@ Options:
   --personas <list>     reader personas (default: all bundled)
   --readers <N>         cap the number of readers
   --max-tokens <N>      reader output cap (default 8192)
+  --judge-max-tokens <N>  judge output cap per call (default 4096); also sizes the re-read batches,
+                        and the pre-run estimate and --max-usd check price every judge call at it
   --prices <file>       price overrides {"models": {"<id>": {"input": usd/Mtok, "output": usd/Mtok}}}
   --length-benchmark <file>  {materiallyLonger, correlatesWithLowerSelection, source}; only both true promotes length complaints
   --estimate-only       print the pre-run estimate and exit without calling any model.
@@ -62,6 +64,7 @@ const OPTIONS = {
   readers: { type: "string" },
   "max-usd": { type: "string" },
   "max-tokens": { type: "string" },
+  "judge-max-tokens": { type: "string" },
   prices: { type: "string" },
   "length-benchmark": { type: "string" },
   out: { type: "string" },
@@ -108,6 +111,15 @@ export async function main(argv, { env = process.env, stdout = process.stdout, s
     return EXIT.usage;
   }
 
+  let judgeMaxTokens;
+  if (v["judge-max-tokens"] !== undefined) {
+    judgeMaxTokens = Number(v["judge-max-tokens"]);
+    if (!Number.isInteger(judgeMaxTokens) || judgeMaxTokens <= 0) {
+      stderr.write("--judge-max-tokens must be a positive integer\n");
+      return EXIT.usage;
+    }
+  }
+
   let opts;
   try {
     opts = {
@@ -120,6 +132,7 @@ export async function main(argv, { env = process.env, stdout = process.stdout, s
       personas: list(v.personas),
       maxReaders: v.readers ? Number(v.readers) : undefined,
       maxTokens: v["max-tokens"] ? Number(v["max-tokens"]) : undefined,
+      judgeMaxTokens,
       maxUsd,
       prices: loadPrices(v.prices),
       lengthBenchmark: v["length-benchmark"] ? JSON.parse(readFileSync(v["length-benchmark"], "utf8")) : null,

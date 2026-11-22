@@ -2,7 +2,7 @@
 //
 // Two jobs:
 //   gradeTeachBack: compare one reader's teach-back with the intended
-//     meaning. The judge never sees which model or persona wrote it. Graded
+//     meaning and the tool's own payload text. The judge never sees which model or persona wrote it. Graded
 //     in batches of TEACHBACK_BATCH_SIZE tools, one call per batch, so a large
 //     payload never needs one huge reply that the output cap cuts off.
 //   reread: for complaints raised by exactly one reader, re-read the copy
@@ -56,17 +56,32 @@ export class JudgeError extends Error {
 }
 
 /**
+ * The payload text the judge is shown for one tool: its whole entry in the
+ * tools/list payload (description, input schema, annotations). A detail the
+ * reader read there is true even when the truth file's `meaning` leaves it out.
+ */
+export function payloadToolText(payload, tool) {
+  const entry = payload?.tools?.find((t) => t && t.name === tool);
+  return entry ? JSON.stringify(entry) : "";
+}
+
+/**
  * @param {object} truth
  * @param {object[]} teachBack
  * @param {string[]} [tools]  the tools to grade (default: every tool in truth)
+ * @param {object} [payload]  the normalized payload ({tools, instructions?}); each
+ *        item carries its tool's payload text, and the server instructions are
+ *        shown once, so a true payload detail is not mistaken for drift
  */
-export function buildTeachBackPrompt(truth, teachBack, tools = Object.keys(truth.tools)) {
+export function buildTeachBackPrompt(truth, teachBack, tools = Object.keys(truth.tools), payload = null) {
   const items = tools.map((tool) => [tool, truth.tools[tool]]).map(([tool, t]) => ({
     tool,
     intended: t.meaning,
+    payload: payloadToolText(payload, tool),
     reader: teachBack.find((x) => x.tool === tool)?.meaning ?? "",
   }));
-  return fillTemplate(TEACHBACK_TEMPLATE, { items: JSON.stringify(items, null, 1) });
+  const instructions = typeof payload?.instructions === "string" && payload.instructions ? payload.instructions : "(none)";
+  return fillTemplate(TEACHBACK_TEMPLATE, { instructions, items: JSON.stringify(items, null, 1) });
 }
 
 export function buildRereadPrompt(payload, complaints) {
@@ -95,10 +110,10 @@ async function ask(client, prompt, maxTokens) {
  * its JudgeError: a partly graded teach-back is not a graded one.
  * @returns {Promise<Array<{tool, recovered: boolean, drift: string}>>}
  */
-export async function gradeTeachBack(client, truth, teachBack, { maxTokens = 4096, batchSize = TEACHBACK_BATCH_SIZE } = {}) {
+export async function gradeTeachBack(client, truth, teachBack, { maxTokens = 4096, batchSize = TEACHBACK_BATCH_SIZE, payload = null } = {}) {
   const out = [];
   for (const tools of teachBackBatches(truth, batchSize)) {
-    const obj = await ask(client, buildTeachBackPrompt(truth, teachBack, tools), maxTokens);
+    const obj = await ask(client, buildTeachBackPrompt(truth, teachBack, tools, payload), maxTokens);
     const grades = Array.isArray(obj.grades) ? obj.grades : [];
     out.push(
       ...grades

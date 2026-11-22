@@ -82,7 +82,8 @@ async function runVersion(ver, extra = {}) {
       requests: fixtureJson(`neumann/requests-${ver}.json`),
       models: MODELS,
       judge: "claude-sonnet-4-6",
-      maxUsd: 5,
+      // Headroom over the estimate: the judge prompt carries the payload too (issue 38).
+      maxUsd: 6,
       prices: TEST_PRICES,
       env: {},
       ...extra,

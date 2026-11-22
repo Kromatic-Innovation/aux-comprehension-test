@@ -73,7 +73,7 @@ export function scriptedJudge(model, { ambiguousIds = [], prompts, pad = 0, rere
             .map((c) => ({ id: c.id, ambiguous: ambiguousIds.includes(c.id), why: "scripted re-read" + (rereadPad ? " " + "w".repeat(rereadPad) : "") })),
         };
       } else {
-        const items = JSON.parse(prompt.slice(prompt.indexOf("ITEMS:") + 6));
+        const items = JSON.parse(prompt.slice(prompt.lastIndexOf("ITEMS:") + 6));
         out = {
           grades: items.map((it) => {
             const a = words(it.intended);

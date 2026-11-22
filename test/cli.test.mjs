@@ -289,3 +289,42 @@ test("an also_acceptable entry outside the payload exits 64", async () => {
   assert.match(err.text, /also_acceptable "no_such_tool"/);
   assert.equal(existsSync(out), false);
 });
+
+test("--judge-max-tokens sets the judge output cap, and the estimate prices it", async () => {
+  const { base } = setup();
+  const usd = async (extra) => {
+    const stdout = sink();
+    assert.equal(await main([...base, "--judge", "claude-sonnet-4-6", "--max-usd", "100", "--estimate-only", ...extra], { env: {}, stdout, stderr: sink(), deps: deps() }), 0);
+    return Number(stdout.text.match(/\$([0-9.]+) over/)[1]);
+  };
+  const dflt = await usd([]);
+  assert.equal(await usd(["--judge-max-tokens", "4096"]), dflt);
+  assert.ok((await usd(["--judge-max-tokens", "32000"])) > dflt);
+  // The --max-usd check uses it too: a ceiling the default fits under refuses at a larger cap.
+  const refusedAt = (dflt + (await usd(["--judge-max-tokens", "32000"]))) / 2;
+  const err = sink();
+  const code = await main([...base, "--judge", "claude-sonnet-4-6", "--max-usd", String(refusedAt), "--estimate-only", "--judge-max-tokens", "32000"], { env: {}, stdout: sink(), stderr: err, deps: deps() });
+  assert.equal(code, EXIT.refused, err.text);
+});
+
+test("--judge-max-tokens reaches run() as judgeMaxTokens", async () => {
+  const { base, out } = setup();
+  const seen = [];
+  const judge = { model: "claude-sonnet-4-6", async complete(req) { seen.push(req.maxTokens); return { ok: true, text: '{"grades":[],"rereads":[]}', usage: { inputTokens: 1, outputTokens: 1 } }; } };
+  const clientFor = mockClientFor({ script: miniReader(), judgeModel: "claude-sonnet-4-6", judge });
+  await main([...base, "--judge", "claude-sonnet-4-6", "--judge-max-tokens", "12345", "--max-usd", "5", "--out", out], { env: {}, stdout: sink(), stderr: sink(), deps: { clientFor } });
+  assert.ok(seen.length > 0);
+  assert.ok(seen.every((n) => n === 12345), JSON.stringify(seen));
+});
+
+test("--judge-max-tokens must be a positive integer (exit 64), and --help documents it", async () => {
+  const { base, out } = setup();
+  for (const bad of ["0", "-1", "abc", "1.5"]) {
+    const err = sink();
+    assert.equal(await main([...base, `--judge-max-tokens=${bad}`, "--max-usd", "1", "--out", out], { env: {}, stdout: sink(), stderr: err, deps: deps() }), EXIT.usage);
+    assert.match(err.text, /--judge-max-tokens must be a positive integer/);
+  }
+  const stdout = sink();
+  assert.equal(await main(["--help"], { env: {}, stdout, stderr: sink() }), 0);
+  assert.match(stdout.text, /--judge-max-tokens <N>/);
+});
