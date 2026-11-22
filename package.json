@@ -1,6 +1,6 @@
 {
   "name": "aux-comprehension-test",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Blind, cross-model comprehension test for MCP tool copy: reader models teach back a tools/list payload, route realistic requests, and report confusion; graded against author-written ground truth into a cut-list and a pass/conditional/fail verdict.",
   "license": "Apache-2.0",
   "author": "Kromatic",
