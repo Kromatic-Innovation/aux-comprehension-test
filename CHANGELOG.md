@@ -16,6 +16,11 @@
   the refusal: `got "300" (string)`, not `got 300`, which read like a valid
   value. A string is still refused
   ([#55](https://github.com/Kromatic-Innovation/aux-comprehension-test/issues/55)).
+- README § First run gives a local-install form of the command
+  (`npx aux-comprehension-test run` with `node_modules/aux-comprehension-test/...`
+  paths) after the global one, for a project that ran
+  `npm install aux-comprehension-test`
+  ([#56](https://github.com/Kromatic-Innovation/aux-comprehension-test/issues/56)).
 
 ## [0.2.1] - 2026-11-22
 
