@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.2] - unreleased
+
+### Added
+
+### Changed
+
+### Fixed
+
+- README: the `run()` result sample now lists `cost.estimate.parts` and
+  `cost.reread`, says `cost.reread` is `null` when no judge is configured,
+  and shows the current `version`. § Cost says the same
+  ([#54](https://github.com/Kromatic-Innovation/aux-comprehension-test/issues/54)).
+
 ## [0.2.1] - 2026-11-22
 
 Honest judge cost reporting. The pre-run estimate no longer calls its total
