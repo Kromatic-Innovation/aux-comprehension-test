@@ -3,6 +3,21 @@
 const esc = (s) => String(s ?? "").replace(/\|/g, "\\|").replace(/\s+/g, " ").trim();
 const clip = (s, n = 240) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
+// Readers + teach-back are an upper bound; the re-read is priced for an
+// assumed row count, so it is an estimate only (see run.mjs).
+function estimateDetail(est) {
+  const p = est?.parts;
+  if (!p) return "";
+  if (!p.reread) return " (readers, upper bound)";
+  return ` (readers + teach-back ≤ $${p.bounded.usd.toFixed(4)}; re-read estimated at $${p.reread.usd.toFixed(4)} for ${p.reread.rowsAssumed} rows)`;
+}
+
+function rereadRowsLine(r) {
+  if (!r) return [];
+  const base = `- re-read rows: ${r.rows} to re-read, ${r.rowsSent} sent, ${r.rowsAssumed} assumed by the estimate`;
+  return [r.overAssumed ? `${base} — more than the estimate assumed, so its re-read part understated the spend (--max-usd still held)` : base];
+}
+
 export function renderVerdictMd(result) {
   const g = result.grade;
   const L = [
@@ -12,7 +27,8 @@ export function renderVerdictMd(result) {
     `- readers answered: ${result.readers.filter((r) => r.status === "ok").length}; failed: ${result.readers.filter((r) => r.status === "error").length}; skipped: ${result.skipped.length}`,
     `- judge: ${result.judge.model ?? `none${result.judge.skipped ? ` (${result.judge.skipped})` : ""}`}`,
     `- rows: ${g.counts.structural} structural, ${g.counts.mustFix} must-fix, ${g.counts.readerError} reader-error, ${g.counts.informational} informational`,
-    `- spend: estimate ≤ $${result.cost.estimate.usd.toFixed(4)}, actual $${result.cost.actual.usd.toFixed(4)}${result.cost.actual.approximate ? " (partly approximate)" : ""}${result.cost.actual.retries ? ` including ${result.cost.actual.retries} retried attempt(s)` : ""}, ceiling $${result.cost.maxUsd}`,
+    `- spend: estimate $${result.cost.estimate.usd.toFixed(4)}${estimateDetail(result.cost.estimate)}, actual $${result.cost.actual.usd.toFixed(4)}${result.cost.actual.approximate ? " (partly approximate)" : ""}${result.cost.actual.retries ? ` including ${result.cost.actual.retries} retried attempt(s)` : ""}, ceiling $${result.cost.maxUsd}`,
+    ...rereadRowsLine(result.cost.reread),
     "",
   ];
   if (g.withheldPass.length) {

@@ -129,7 +129,7 @@ test("the README's first run works with no provider key and spends nothing", asy
   const code = await main(argv, { env: {}, stdout, stderr });
 
   assert.equal(code, 0, `expected exit 0, got ${code}; stderr: ${stderr.text}`);
-  assert.match(stdout.text, /estimated spend \(upper bound\): \$\d+\.\d{4} over 4 call\(s\)/);
+  assert.match(stdout.text, /estimated spend: \$\d+\.\d{4} over 4 call\(s\)\n  readers \(upper bound\): \$\d+\.\d{4} over 4 call\(s\)/);
   assert.match(stdout.text, /priced: 4 reader\(s\)/);
   assert.match(stdout.text, /runnable now: 0 of 4 reader\(s\) have a key/);
   assert.match(stdout.text, /no model was called; nothing was spent\./);

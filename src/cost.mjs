@@ -1,6 +1,6 @@
 // cost.mjs — pre-run spend estimate and post-run actual spend.
 //
-// The estimate is an upper bound: input tokens are ceil(chars / 4) of the
+// Each call's estimate is an upper bound: input tokens are ceil(chars / 4) of the
 // exact prompt each call will send, and output tokens are the full output
 // cap for that call. It fails closed: a model with no known price throws
 // instead of being priced at zero, because a zero price would silently
@@ -16,7 +16,9 @@
 // spend at its full input (chars / 4 of the prompt) and zero output, because
 // the provider reports no usage for a failed attempt. The estimate counts the
 // same worst case for every call (MAX_RETRIES retried attempts, then a full
-// reply), so it stays an upper bound when calls are retried.
+// reply), so it stays an upper bound when calls are retried. The run total is
+// only a bound for the calls run.mjs knows in advance: the re-read is priced
+// for an assumed row count (run.mjs estimateParts).
 
 import { readFileSync } from "node:fs";
 import { readJsonAsset } from "./assets.mjs";
