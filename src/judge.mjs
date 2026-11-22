@@ -138,11 +138,30 @@ export const REREAD_TOKENS_PER_ROW = 300;
  */
 export const MIN_JUDGE_MAX_TOKENS = REREAD_TOKENS_PER_ROW;
 
-/** Why a judge output cap is refused, or null when it is usable. */
+/** A value as JSON where it has a JSON form, else as String() (a BigInt, a circular object). */
+function quote(v) {
+  try {
+    return JSON.stringify(v) ?? String(v);
+  } catch {
+    try {
+      return String(v);
+    } catch {
+      return Object.prototype.toString.call(v);
+    }
+  }
+}
+
+/**
+ * Why a judge output cap is refused, or null when it is usable. `shown` is how
+ * the value is quoted (the CLI passes the raw flag text). A value that is not a
+ * number is quoted with its type, so `"300"` (a string) does not read like the
+ * valid number 300.
+ */
 export function judgeMaxTokensProblem(n, shown = n) {
   if (Number.isInteger(n) && n >= MIN_JUDGE_MAX_TOKENS) return null;
+  const got = typeof n === "number" ? shown : `${quote(n)} (${n === null ? "null" : typeof n})`;
   return (
-    `must be an integer of at least ${MIN_JUDGE_MAX_TOKENS}, got ${shown}: the judge needs ${REREAD_TOKENS_PER_ROW} output tokens ` +
+    `must be an integer of at least ${MIN_JUDGE_MAX_TOKENS}, got ${got}: the judge needs ${REREAD_TOKENS_PER_ROW} output tokens ` +
     `for one re-read row, and below that even a single-row reply can be cut off`
   );
 }

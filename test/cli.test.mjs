@@ -367,3 +367,30 @@ test("run() refuses a judgeMaxTokens below 300 the same way, for library callers
   }
   assert.equal((await run(opts(300), deps())).status, "estimate");
 });
+
+test("run() names the type when judgeMaxTokens is not a number, so \"300\" does not read like 300", async () => {
+  const { run, RunError } = await import("../src/run.mjs");
+  const opts = {
+    tools: JSON.parse(readFileSync(join(FIXTURES, "mini/tools.json"), "utf8")),
+    truth: readFileSync(join(FIXTURES, "mini/truth.md"), "utf8"),
+    requests: JSON.parse(readFileSync(join(FIXTURES, "mini/requests.json"), "utf8")),
+    models: ["claude-haiku-4-5", "gpt-5"],
+    judge: "claude-sonnet-4-6",
+    maxUsd: 5,
+    prices: TEST_PRICES,
+    env: {},
+    estimateOnly: true,
+  };
+  await assert.rejects(
+    run({ ...opts, judgeMaxTokens: "300" }, deps()),
+    (e) => e instanceof RunError && e.code === "USAGE" && /got "300" \(string\)/.test(e.message),
+  );
+  // A value with no JSON form (BigInt, a circular object) is still a USAGE refusal, not a TypeError.
+  const circular = {};
+  circular.self = circular;
+  for (const [bad, shown] of [[300n, /got 300 \(bigint\)/], [circular, /got \[object Object\] \(object\)/]]) {
+    await assert.rejects(run({ ...opts, judgeMaxTokens: bad }, deps()), (e) => e instanceof RunError && e.code === "USAGE" && shown.test(e.message), typeof bad);
+  }
+  // Control: a refused number is quoted bare, with no type.
+  await assert.rejects(run({ ...opts, judgeMaxTokens: 299 }, deps()), (e) => e instanceof RunError && /got 299: /.test(e.message));
+});
