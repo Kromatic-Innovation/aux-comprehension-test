@@ -352,7 +352,8 @@ What is sent to those providers:
   text of every routing request. It does not receive your ground truth or the
   expected tools.
 - **The judge** (only with `--judge`) receives your **ground-truth file**
-  alongside each reader's teach-back, and the payload alongside any complaint
+  alongside each reader's teach-back, together with each tool's own payload
+  entry and the server instructions, and the payload alongside any complaint
   that exactly one reader raised.
 
 Treat the payload and the ground truth as shared with each provider you name,
@@ -394,7 +395,7 @@ them; `run` reads no files and parses no paths itself.
 | `personas` | `string[]` of reader persona ids | no | all bundled personas | `--personas` |
 | `maxReaders` | number: cap on panel size | no | no cap | `--readers` |
 | `maxTokens` | number: reader output cap | no | `8192` | `--max-tokens` |
-| `judgeMaxTokens` | number: judge output cap | no | `4096` | none |
+| `judgeMaxTokens` | number: judge output cap | no | `4096` | `--judge-max-tokens` |
 | `prices` | flat map `{ <id>: { input, output, above? } }`, USD per million tokens (no `models` wrapper) | no | the bundled `data/prices.json` table | `--prices` (merged over the bundled table) |
 | `lengthBenchmark` | `{ materiallyLonger, correlatesWithLowerSelection, source }` | no | `null` | `--length-benchmark` |
 | `out` | directory path to write outputs into | no | write nothing | `--out` |

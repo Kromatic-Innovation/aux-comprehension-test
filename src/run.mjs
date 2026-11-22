@@ -133,7 +133,7 @@ export async function run(opts, deps = {}) {
         calls.push({
           purpose: `judge teach-back ${reader.personaId} (batch ${i + 1}/${batches.length})`,
           model: pricedJudge,
-          prompt: buildTeachBackPrompt(truth, fakeTeachBack, tools),
+          prompt: buildTeachBackPrompt(truth, fakeTeachBack, tools, payload),
           maxTokens: judgeMaxTokens,
         });
       });
@@ -205,7 +205,7 @@ export async function run(opts, deps = {}) {
     teachBackGrades = new Map();
     for (const r of ok) {
       try {
-        teachBackGrades.set(`${r.personaId}__${r.model}`, await gradeTeachBack(jc, truth, r.response.teachBack, { maxTokens: judgeMaxTokens }));
+        teachBackGrades.set(`${r.personaId}__${r.model}`, await gradeTeachBack(jc, truth, r.response.teachBack, { maxTokens: judgeMaxTokens, payload }));
       } catch (err) {
         judgeFailed(`teach-back ${r.personaId}__${r.model}`, err);
       }

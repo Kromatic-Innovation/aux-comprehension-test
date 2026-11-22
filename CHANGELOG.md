@@ -79,6 +79,13 @@ First version.
   section before the tools, an optional `## server-instructions` ground-truth
   section is graded for teach-back, and token-weight reports them on their
   own row.
+- The teach-back judge sees each tool's own payload text and the server
+  instructions alongside the truth file's `meaning`, and is told that a detail
+  present in the payload is never drift, so a reader who repeats a true detail
+  the truth file leaves out is no longer reported as drift.
+- `--judge-max-tokens <N>`: the judge's output cap per call (default 4096). It
+  sizes the re-read batches, and the pre-run estimate and the `--max-usd`
+  check price every judge call at it.
 
 ### Changed
 

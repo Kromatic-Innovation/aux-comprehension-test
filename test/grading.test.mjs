@@ -12,7 +12,8 @@ beforeEach(resetRegistry);
 // ── crossModel ──────────────────────────────────────────────────────────────────────
 
 test("counter-example: two Anthropic models with zero defects yield conditional, not pass", async () => {
-  const res = await runMini({ models: ["claude-haiku-4-5", "claude-sonnet-4-6"] });
+  // Two pricier readers: the judge prompt carries the payload too (issue 38), so leave headroom.
+  const res = await runMini({ models: ["claude-haiku-4-5", "claude-sonnet-4-6"], maxUsd: 2 });
   assert.equal(res.grade.counts.mustFix, 0);
   assert.equal(res.grade.counts.structural, 0);
   assert.equal(res.grade.crossModel, false);
