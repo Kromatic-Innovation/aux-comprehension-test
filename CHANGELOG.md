@@ -25,6 +25,14 @@
   command above its sample estimate, and the sample is that command's full
   output. A test runs the README's command and checks the sample against it
   ([#57](https://github.com/Kromatic-Innovation/aux-comprehension-test/issues/57)).
+- A run whose re-read rows matched the estimate's assumed count but carried
+  complaints longer than its 400-character placeholder spent more on the
+  re-read than the estimate showed, and said nothing: `overAssumed` only
+  compares row counts. `verdict.json`'s `cost.reread` now also records
+  `inputCharsAssumed`, `inputChars` and `inputOverAssumed`, and the CLI
+  summary prints a `re-read input:` line when the input exceeded the
+  estimate. No existing field changed. `--max-usd` enforcement is unchanged
+  ([#65](https://github.com/Kromatic-Innovation/aux-comprehension-test/issues/65)).
 
 ## [0.2.1] - 2026-11-22
 

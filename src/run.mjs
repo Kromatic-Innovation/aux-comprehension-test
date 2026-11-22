@@ -119,6 +119,7 @@ export async function run(opts, deps = {}) {
 
   // Pre-run estimate: the exact reader prompts, full output caps.
   let rereadRowsAssumed = null;
+  let rereadCharsAssumed = null;
   const priced = opts.estimateOnly ? panel.map((reader) => ({ reader })) : active;
   const pricedJudge = opts.estimateOnly ? (judgeSpec?.model ?? null) : judge.model;
   const calls = priced.map(({ reader }) => ({
@@ -153,8 +154,11 @@ export async function run(opts, deps = {}) {
     rereadRowsAssumed = requests.length + 2 * nTools;
     const fakeRow = { id: "x".repeat(40), tools: ["x".repeat(40)], about: "x".repeat(40), complaint: "x".repeat(400), defect: "x".repeat(120) };
     const chunks = rereadBatches(Array.from({ length: rereadRowsAssumed }, () => fakeRow), rereadBatchSize(judgeMaxTokens));
+    rereadCharsAssumed = 0;
     chunks.forEach((rows, i) => {
-      calls.push({ purpose: `judge re-read (batch ${i + 1}/${chunks.length})`, model: pricedJudge, prompt: buildRereadPrompt(payload, rows), maxTokens: judgeMaxTokens });
+      const prompt = buildRereadPrompt(payload, rows);
+      rereadCharsAssumed += prompt.length;
+      calls.push({ purpose: `judge re-read (batch ${i + 1}/${chunks.length})`, model: pricedJudge, prompt, maxTokens: judgeMaxTokens });
     });
   }
   let est;
@@ -247,7 +251,10 @@ export async function run(opts, deps = {}) {
         for (const c of rows) rereadGaps.set(c.id, `not re-read: ${reason}`);
       },
     });
-    rereadReport = rereadRowReport(rereadRowsAssumed, candidates.length, candidates.length - rowsStopped);
+    rereadReport = {
+      ...rereadRowReport(rereadRowsAssumed, candidates.length, candidates.length - rowsStopped),
+      ...rereadInputReport(rereadCharsAssumed, rereadInputChars(payload, candidates, judgeMaxTokens)),
+    };
   }
   const judgeFailure = judgeFailures.length ? failureSummary(judgeFailures) : null;
   const tokenWeight = await measureTokenWeight(payload);
@@ -334,6 +341,27 @@ export function estimateParts(est, rowsAssumed) {
  */
 export function rereadRowReport(rowsAssumed, rows, rowsSent) {
   return { rowsAssumed, rows, rowsSent, overAssumed: rowsAssumed != null && rows > rowsAssumed };
+}
+
+/**
+ * The input characters of every re-read prompt the rows due a re-read need:
+ * the same batches reread() builds, whether or not the spend cap let each one
+ * be sent (as `rows` counts rows due, not rows sent).
+ */
+export function rereadInputChars(payload, candidates, judgeMaxTokens) {
+  return rereadBatches(candidates, rereadBatchSize(judgeMaxTokens)).reduce((n, rows) => n + buildRereadPrompt(payload, rows).length, 0);
+}
+
+/**
+ * The re-read's input size against what the estimate priced. The estimate
+ * prices each assumed row as a fixed-size placeholder (a 400-character
+ * complaint, a 120-character defect), so real rows with longer complaints can
+ * need more input than it showed even when the row count matches.
+ * `inputOverAssumed` is true when they did, so the re-read part of the
+ * estimate understated it.
+ */
+export function rereadInputReport(inputCharsAssumed, inputChars) {
+  return { inputCharsAssumed, inputChars, inputOverAssumed: inputCharsAssumed != null && inputChars > inputCharsAssumed };
 }
 
 /** A short cause for row labels: the first failure, plus how many more. */
