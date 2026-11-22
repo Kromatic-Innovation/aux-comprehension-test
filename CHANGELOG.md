@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.2.3] - 2026-11-22
+
+Release-review polish. This release adds direct tests for the re-read
+input-size helpers that 0.2.2 introduced, and fixes a README § Cost passage
+whose pronoun pointed at the wrong noun. No code under `src/` changed.
+
+- No behaviour change. No output change: `verdict.json` and the CLI summary
+  are the same as on 0.2.2, apart from the `version` field.
+- No breaking API change. No experimental surface added. No
+  security-relevant change: the judge receives the same data as on 0.2.2.
+  To upgrade, install the new version. No flags or inputs need to change.
+
+### Added
+
+- None. The new tests ship no new surface.
+
+### Changed
+
+- None.
+
+### Fixed
+
+- `rereadInputChars`, `rereadInputReport` and `rereadInputOverLine` now have
+  direct unit tests, as `rereadRowReport` does. A test pins that
+  `cost.reread.inputChars` counts every batch a full re-read needs, not only
+  the batches sent before `--max-usd` stopped it, and a test reaches
+  `quote()`'s `Object.prototype.toString` fallback
+  ([#74](https://github.com/Kromatic-Innovation/aux-comprehension-test/issues/74)).
+- README § Cost: the sentence about `cost.reread` being `null` with no judge
+  sat ahead of "It still never goes over the ceiling", so "It" read as
+  `cost.reread`. The ceiling sentence names the re-read again and the `null`
+  sentence closes the passage, wrapped to the file's line width
+  ([#75](https://github.com/Kromatic-Innovation/aux-comprehension-test/issues/75)).
+
 ## [0.2.2] - 2026-11-22
 
 Cost-report completeness. A run now says when its re-read cost more than

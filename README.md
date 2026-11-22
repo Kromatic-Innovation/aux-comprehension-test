@@ -485,7 +485,7 @@ A completed run resolves to the object written to `verdict.json`:
 {
   status: "completed",
   tool: "aux-comprehension-test",
-  version: "0.2.2",
+  version: "0.2.3",
   grade: {
     verdict: "pass" | "conditional" | "fail",
     crossModel: true,                 // readers came from two or more providers
