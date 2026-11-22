@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.2.1] - 2026-11-22
+
+Honest judge cost reporting. The pre-run estimate no longer calls its total
+an upper bound when part of it is not one. A judge output cap too small to
+hold one re-read row is now refused.
+
+- **Behaviour change.** A command line with `--judge-max-tokens` below 300
+  (or a `run()` call with `judgeMaxTokens` below 300) ran on 0.2.0 and is
+  refused on 0.2.1 with exit `64` (`RunError` code `USAGE`). Below 300 even a
+  one-row re-read reply could be cut off, so those runs paid for judge calls
+  and still came back `conditional`.
+- **Output change.** The `--estimate-only` line now reads
+  `estimated spend: $T over N call(s)`, followed by a
+  `readers + teach-back (upper bound)` line and, with `--judge`, a
+  `re-read (estimated, N rows assumed)` line. A script that matched
+  `estimated spend (upper bound)` needs updating. `verdict.json` gains
+  `cost.estimate.parts` and `cost.reread`. No existing field changed.
+- No breaking API change beyond the refused values above. No experimental
+  surface added. No security-relevant change: the judge receives the same
+  data as on 0.2.0. To upgrade, install the new version and raise any
+  `--judge-max-tokens` below 300 to at least 300.
+
+### Added
+
+- None. The new `verdict.json` fields are part of the fixes below.
+
+### Changed
+
+- `--judge-max-tokens` and `run()`'s `judgeMaxTokens` must be an integer of
+  at least 300 (`REREAD_TOKENS_PER_ROW`, the room one re-read row needs). A
+  smaller value is refused with a message that names the minimum and why.
+  `--help` and the README options table give the minimum
+  ([#44](https://github.com/Kromatic-Innovation/aux-comprehension-test/issues/44)).
+
+### Fixed
+
+- The pre-run estimate no longer calls its total an upper bound. The reader
+  and teach-back calls are a bound. The re-read is priced for an assumed row
+  count (one per request plus two per tool), and confusion rows have no
+  bound, so that part is an estimate. The CLI prints the two parts
+  separately. A run with more re-read rows than the estimate assumed now says
+  so: `verdict.json`'s `cost.reread` records `rowsAssumed`, `rows`,
+  `rowsSent` and `overAssumed`, and `verdict.md` and the CLI summary print
+  the counts. Before, a `--max-usd` set equal to the estimate could end
+  `conditional` ("re-read incomplete") with no warning. Spend-stop is
+  unchanged: `--max-usd` still holds
+  ([#43](https://github.com/Kromatic-Innovation/aux-comprehension-test/issues/43)).
+
 ## [0.2.0] - 2026-11-22
 
 The judge is more trustworthy on large payloads, and `pass` is withheld in two
