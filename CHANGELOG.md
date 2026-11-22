@@ -20,21 +20,21 @@ more cases where the run could not prove it.
 
 - `--judge-max-tokens <N>`: set the judge's output cap from the CLI
   (`run()`'s `judgeMaxTokens`, default 4096). The pre-run estimate and the
-  `--max-usd` check price judge calls at this cap (#38).
+  `--max-usd` check price judge calls at this cap ([#38](https://github.com/Kromatic-Innovation/aux-comprehension-test/issues/38)).
 
 ### Changed
 
 - `pass` is withheld when fewer readers answered than the panel was configured
   for. A reader that was skipped for a missing key, whose call failed, or
   whose reply could not be parsed did not answer. `withheldPass` names each
-  missing reader and why. A run that fails still fails (#34).
+  missing reader and why. A run that fails still fails ([#34](https://github.com/Kromatic-Innovation/aux-comprehension-test/issues/34)).
 - The single-reader re-read is sent to the judge in batches sized from its
   output cap, so no single reply has to hold every row. A failed batch is
   recorded and the next one is still sent. Before each batch, the spend so far
   plus that batch's upper bound is checked against `--max-usd`, and the
   re-read stops rather than go over. Any row left without a verdict withholds
   `pass`, with the count and the cause. The pre-run estimate prices several
-  re-read batches instead of one (#35).
+  re-read batches instead of one ([#35](https://github.com/Kromatic-Innovation/aux-comprehension-test/issues/35)).
 - The README install section now shows the published npm package first.
 - CI: `actions/create-github-app-token` bumped to v3.3.0.
 
@@ -45,7 +45,7 @@ more cases where the run could not prove it.
   detail that the payload states but the truth leaves out looked invented. Now
   each teach-back item carries its tool's payload entry, the prompt shows the
   server instructions once, and the template says that a detail present in
-  the payload is never drift (#38).
+  the payload is never drift ([#38](https://github.com/Kromatic-Innovation/aux-comprehension-test/issues/38)).
 
 ## [0.1.0] - 2026-11-17
 
