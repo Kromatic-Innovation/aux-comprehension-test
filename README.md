@@ -73,6 +73,22 @@ aux-comprehension-test run \
   --estimate-only
 ```
 
+Installed locally instead (`npm install aux-comprehension-test` in a project)?
+Run this from that project's directory. `npx` finds the local CLI, and the
+example sits under `node_modules`:
+
+```bash
+npx aux-comprehension-test run \
+  --tools node_modules/aux-comprehension-test/examples/mini/tools.json \
+  --truth node_modules/aux-comprehension-test/examples/mini/truth.md \
+  --requests node_modules/aux-comprehension-test/examples/mini/requests.json \
+  --models claude-haiku-4-5,gpt-5 \
+  --max-usd 1 \
+  --estimate-only
+```
+
+Either command prints:
+
 ```
 SKIPPED reader small-context-host x claude-haiku-4-5: ANTHROPIC_API_KEY is not set
 SKIPPED reader cautious-agent x gpt-5: OPENAI_API_KEY is not set
@@ -100,7 +116,7 @@ estimated spend: $0.9067 over 9 call(s)
 ```
 
 The paths above are the small example payload that ships in the package, under
-`examples/mini/` of the global install. From a git checkout, use
+`examples/mini/` of the install (global or `node_modules`). From a git checkout, use
 `examples/mini/tools.json` and so on directly. Nothing about `--estimate-only`
 depends on the example: point the same three flags at your own `tools.json`,
 `truth.md` and `requests.json`.
