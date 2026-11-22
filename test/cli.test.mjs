@@ -168,6 +168,18 @@ test("--estimate-only prices the whole panel, so a missing key does not change t
   assert.match(allKeys.text, /runnable now: 4 of 4/);
 });
 
+test("with one provider key, the README's first run skips only that provider's readers (as README § First run says)", async () => {
+  const stdout = sink();
+  const stderr = sink();
+  assert.equal(await main(readmeFirstRunArgv(), { env: { ANTHROPIC_API_KEY: "x" }, stdout, stderr }), 0, stderr.text);
+  const skipped = stderr.text.split("\n").filter((l) => l.startsWith("SKIPPED"));
+  assert.equal(skipped.length, 2, stderr.text);
+  for (const l of skipped) assert.match(l, /x gpt-5: OPENAI_API_KEY is not set$/);
+  assert.match(stdout.text, /runnable now: 2 of 4 reader\(s\) have a key/);
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  assert.match(readme, /only `ANTHROPIC_API_KEY` set, the two\s+`gpt-5` readers are skipped and the count reads `runnable now: 2 of 4`/);
+});
+
 test("a real run with no key still refuses (exit 3) -- only --estimate-only is key-free", async () => {
   const { base, out } = setup();
   const err = sink();
