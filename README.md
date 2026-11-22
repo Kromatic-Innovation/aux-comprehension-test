@@ -107,12 +107,34 @@ code is 0.
 
 With `--judge`, the estimate has a second part. The reader and teach-back calls
 stay an upper bound; the re-read is only an estimate, because its row count is
-not known until the readers answer (see [Cost](#cost)):
+not known until the readers answer (see [Cost](#cost)). Add `--judge <model>`
+to the same command. The judge must be a model with a price, either in the
+bundled table `data/prices.json` (for example `claude-sonnet-4-6`) or in your
+own `--prices` file:
+
+```bash
+aux-comprehension-test run \
+  --tools "$(npm root -g)/aux-comprehension-test/examples/mini/tools.json" \
+  --truth "$(npm root -g)/aux-comprehension-test/examples/mini/truth.md" \
+  --requests "$(npm root -g)/aux-comprehension-test/examples/mini/requests.json" \
+  --models claude-haiku-4-5,gpt-5 \
+  --judge claude-sonnet-4-6 \
+  --max-usd 1 \
+  --estimate-only
+```
 
 ```
+SKIPPED reader small-context-host x claude-haiku-4-5: ANTHROPIC_API_KEY is not set
+SKIPPED reader cautious-agent x gpt-5: OPENAI_API_KEY is not set
+SKIPPED reader technical-term-searcher x claude-haiku-4-5: ANTHROPIC_API_KEY is not set
+SKIPPED reader literal-reader x gpt-5: OPENAI_API_KEY is not set
+SKIPPED judge claude-sonnet-4-6: ANTHROPIC_API_KEY is not set
 estimated spend: $0.9067 over 9 call(s)
   readers + teach-back (upper bound): $0.8254 over 8 call(s)
   re-read (estimated, 10 rows assumed): $0.0813 over 1 call(s); more rows cost more, up to --max-usd
+priced: 4 reader(s) + judge claude-sonnet-4-6 (no key yet), ceiling $1
+runnable now: 0 of 4 reader(s) have a key
+no model was called; nothing was spent.
 ```
 
 The paths above are the small example payload that ships in the package, under
