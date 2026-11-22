@@ -96,6 +96,11 @@ export function rereadOverLine(r) {
   return `re-read: ${r.rows} rows, ${r.rowsAssumed} assumed by the estimate (${r.rowsSent} sent); the re-read part of the estimate was exceeded`;
 }
 
+/** One line for a run whose re-read needed more input than the estimate priced. */
+export function rereadInputOverLine(r) {
+  return `re-read input: ${r.inputChars} chars, ${r.inputCharsAssumed} assumed by the estimate's placeholder rows; the re-read part of the estimate was exceeded`;
+}
+
 const list = (s) => (s ? s.split(",").map((x) => x.trim()).filter(Boolean) : undefined);
 
 /**
@@ -206,6 +211,7 @@ export async function main(argv, { env = process.env, stdout = process.stdout, s
       (g.withheldPass.length ? `pass withheld: ${g.withheldPass.join("; ")}\n` : "") +
       `spend: $${result.cost.actual.usd.toFixed(4)} actual, $${result.cost.estimate.usd.toFixed(4)} estimated, ceiling $${maxUsd}\n` +
       (result.cost.reread?.overAssumed ? `${rereadOverLine(result.cost.reread)}\n` : "") +
+      (result.cost.reread?.inputOverAssumed ? `${rereadInputOverLine(result.cost.reread)}\n` : "") +
       `wrote ${opts.out}/verdict.md\n`,
   );
   return EXIT[g.verdict];

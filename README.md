@@ -328,8 +328,15 @@ an estimate, printed separately with the number of rows it assumed. A run that
 produces more rows than that spends more on the re-read than the estimate
 showed, and says so: `verdict.json`'s `cost.reread` carries `rowsAssumed`,
 `rows` (rows due a re-read), `rowsSent` and `overAssumed`, and `verdict.md`
-prints the same counts. With no judge configured there is no re-read, and
-`cost.reread` is `null`. It still never goes over the ceiling: spend is checked
+prints the same counts. Each assumed row is also priced as a fixed-size
+placeholder (a 400-character complaint and a 120-character defect), so rows that
+match the assumed count but carry longer complaints can still need more input
+than the estimate showed. `cost.reread` records that too: `inputCharsAssumed`
+(the input characters of the re-read calls the estimate priced), `inputChars`
+(the input characters of the re-read calls the run's rows needed, sent or not)
+and `inputOverAssumed` (true when `inputChars` is the larger), and the CLI
+summary prints a `re-read input:` line when it is true. With no judge
+configured there is no re-read, and `cost.reread` is `null`. It still never goes over the ceiling: spend is checked
 again before every re-read call, and the re-read stops, withholding `pass`,
 rather than exceed `--max-usd`. So a `--max-usd` set equal to the estimate can
 end `conditional` with "re-read incomplete"; leave headroom above the re-read
@@ -472,7 +479,7 @@ A completed run resolves to the object written to `verdict.json`:
     maxUsd,
     estimate: { usd, maxRetries, calls, parts: { bounded: { usd, calls }, reread: { usd, calls, rowsAssumed } | null } },
     actual: { usd, approximate, retries, calls },
-    reread: { rowsAssumed, rows, rowsSent, overAssumed } | null, // null when no judge is configured
+    reread: { rowsAssumed, rows, rowsSent, overAssumed, inputCharsAssumed, inputChars, inputOverAssumed } | null, // null when no judge is configured
   },
   tokenWeight: { label, method, total: { bytes, tokens }, instructions?: { bytes, tokens }, flags },
   honesty: [ /* panelist's usage header, then HOST_CAVEAT */ ],
