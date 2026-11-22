@@ -317,14 +317,53 @@ test("--judge-max-tokens reaches run() as judgeMaxTokens", async () => {
   assert.ok(seen.every((n) => n === 12345), JSON.stringify(seen));
 });
 
-test("--judge-max-tokens must be a positive integer (exit 64), and --help documents it", async () => {
+test("--judge-max-tokens must be an integer of at least 300 (exit 64), and --help documents it", async () => {
   const { base, out } = setup();
-  for (const bad of ["0", "-1", "abc", "1.5"]) {
+  for (const bad of ["0", "-1", "abc", "1.5", "299", "299.5"]) {
     const err = sink();
-    assert.equal(await main([...base, `--judge-max-tokens=${bad}`, "--max-usd", "1", "--out", out], { env: {}, stdout: sink(), stderr: err, deps: deps() }), EXIT.usage);
-    assert.match(err.text, /--judge-max-tokens must be a positive integer/);
+    assert.equal(await main([...base, `--judge-max-tokens=${bad}`, "--max-usd", "1", "--out", out], { env: {}, stdout: sink(), stderr: err, deps: deps() }), EXIT.usage, bad);
+    assert.match(err.text, /--judge-max-tokens must be an integer of at least 300, got .*: the judge needs 300 output tokens for one re-read row/);
+    assert.equal(existsSync(out), false, "nothing written");
   }
   const stdout = sink();
   assert.equal(await main(["--help"], { env: {}, stdout, stderr: sink() }), 0);
-  assert.match(stdout.text, /--judge-max-tokens <N>/);
+  assert.match(stdout.text, /--judge-max-tokens <N>.*minimum 300/);
+});
+
+test("--judge-max-tokens 299 is refused before any model is called; 300 is accepted", async () => {
+  const calls = { n: 0 };
+  const seen = [];
+  const judge = { model: "claude-sonnet-4-6", async complete(req) { seen.push(req.maxTokens); return { ok: true, text: '{"grades":[],"rereads":[]}', usage: { inputTokens: 1, outputTokens: 1 } }; } };
+  const clientFor = mockClientFor({ script: miniReader(), judgeModel: "claude-sonnet-4-6", judge, calls });
+  let { base, out } = setup();
+  const err = sink();
+  assert.equal(await main([...base, "--judge", "claude-sonnet-4-6", "--judge-max-tokens", "299", "--max-usd", "5", "--out", out], { env: {}, stdout: sink(), stderr: err, deps: { clientFor } }), EXIT.usage);
+  assert.match(err.text, /at least 300, got 299/);
+  assert.equal(calls.n + seen.length, 0, "no model was called");
+  ({ base, out } = setup());
+  const code = await main([...base, "--judge", "claude-sonnet-4-6", "--judge-max-tokens", "300", "--max-usd", "5", "--out", out], { env: {}, stdout: sink(), stderr: sink(), deps: { clientFor } });
+  assert.ok([EXIT.pass, EXIT.conditional].includes(code), `exit ${code}`);
+  assert.ok(seen.length > 0 && seen.every((n) => n === 300), JSON.stringify(seen));
+});
+
+test("run() refuses a judgeMaxTokens below 300 the same way, for library callers", async () => {
+  const { run, RunError } = await import("../src/run.mjs");
+  const { MIN_JUDGE_MAX_TOKENS, REREAD_TOKENS_PER_ROW } = await import("../src/judge.mjs");
+  assert.equal(MIN_JUDGE_MAX_TOKENS, REREAD_TOKENS_PER_ROW);
+  const opts = (judgeMaxTokens) => ({
+    tools: JSON.parse(readFileSync(join(FIXTURES, "mini/tools.json"), "utf8")),
+    truth: readFileSync(join(FIXTURES, "mini/truth.md"), "utf8"),
+    requests: JSON.parse(readFileSync(join(FIXTURES, "mini/requests.json"), "utf8")),
+    models: ["claude-haiku-4-5", "gpt-5"],
+    judge: "claude-sonnet-4-6",
+    maxUsd: 5,
+    prices: TEST_PRICES,
+    env: {},
+    estimateOnly: true,
+    judgeMaxTokens,
+  });
+  for (const bad of [299, 0, 1.5, "300"]) {
+    await assert.rejects(run(opts(bad), deps()), (e) => e instanceof RunError && e.code === "USAGE" && /judgeMaxTokens must be an integer of at least 300/.test(e.message), String(bad));
+  }
+  assert.equal((await run(opts(300), deps())).status, "estimate");
 });

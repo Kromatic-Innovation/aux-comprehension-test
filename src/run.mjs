@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { getPersona, USAGE_HEADER } from "panelist";
 import { normalizePayload, parseTruth, checkTruthCoverage, normalizeRequests, gradedTruth } from "./inputs.mjs";
 import { registerReaderPersonas, buildPanel, parseModelSpec, renderReaderPrompt, runReader, DEFAULT_PERSONA_IDS } from "./reader.mjs";
-import { gradeTeachBack, reread, buildTeachBackPrompt, buildRereadPrompt, teachBackBatches, rereadBatchSize, rereadBatches } from "./judge.mjs";
+import { gradeTeachBack, reread, buildTeachBackPrompt, buildRereadPrompt, teachBackBatches, rereadBatchSize, rereadBatches, judgeMaxTokensProblem } from "./judge.mjs";
 import { buildClusters, rereadCandidates, decide } from "./grade.mjs";
 import { measureTokenWeight, renderTokenWeightMd } from "./tokenweight.mjs";
 import { loadPrices, estimate, meter, actual } from "./cost.mjs";
@@ -45,7 +45,7 @@ export const readerFileName = (r) => `${safe(r.personaId)}__${safe(r.model)}.jso
  *   @param {string[]} [opts.personas]
  *   @param {number} [opts.maxReaders]
  *   @param {number} [opts.maxTokens=8192]      reader output cap
- *   @param {number} [opts.judgeMaxTokens=4096]
+ *   @param {number} [opts.judgeMaxTokens=4096]  judge output cap; an integer >= MIN_JUDGE_MAX_TOKENS (300)
  *   @param {object} [opts.prices]     model -> {input, output} USD/Mtok
  *   @param {object} [opts.lengthBenchmark]
  *   @param {string} [opts.out]        output directory; omit to write nothing
@@ -64,6 +64,8 @@ export async function run(opts, deps = {}) {
   if (!(typeof opts.maxUsd === "number" && Number.isFinite(opts.maxUsd) && opts.maxUsd > 0)) {
     throw new RunError("USAGE", "--max-usd is required and must be a positive number; there is no default");
   }
+  const judgeCapProblem = judgeMaxTokensProblem(judgeMaxTokens);
+  if (judgeCapProblem) throw new RunError("USAGE", `judgeMaxTokens ${judgeCapProblem}`);
   // inputs.mjs and buildPanel throw plain Errors -- they have no opinion about
   // exit codes. Every one of those is the CALLER's input being wrong, so they
   // surface as USAGE (exit 64), never as a bug in this tool (exit 70). Applied
