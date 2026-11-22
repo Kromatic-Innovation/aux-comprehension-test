@@ -1,10 +1,32 @@
 # Changelog
 
-## [0.2.2] - unreleased
+## [0.2.2] - 2026-11-22
+
+Cost-report completeness. A run now says when its re-read cost more than
+the estimate priced because the complaints were longer than assumed, not
+only when there were more of them. The README's first run and `run()`
+result sample match what the tool prints.
+
+- **Behaviour change.** A `run()` call whose `judgeMaxTokens` is not a number
+  is still refused with `RunError` code `USAGE`, but the message now names
+  the type (`got "300" (string)`). A value with no JSON form, such as a
+  BigInt, is refused the same way and no longer escapes as a `TypeError`.
+- **Output change.** `verdict.json`'s `cost.reread` gains
+  `inputCharsAssumed`, `inputChars` and `inputOverAssumed`, and the CLI
+  summary prints a `re-read input:` line when the re-read input exceeded the
+  estimate. No existing field changed, and `--max-usd` enforcement is
+  unchanged.
+- No breaking API change. No experimental surface added. No
+  security-relevant change: the judge receives the same data as on 0.2.1.
+  To upgrade, install the new version. No flags or inputs need to change.
 
 ### Added
 
+- None. The new `verdict.json` fields are part of the fixes below.
+
 ### Changed
+
+- None.
 
 ### Fixed
 
