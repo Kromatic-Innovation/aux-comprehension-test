@@ -40,9 +40,20 @@ npm test
 The version in `package.json` and the first heading of `CHANGELOG.md` move
 together. While a version is in progress, the CHANGELOG's first section is
 `## [<package.json version>] - unreleased`, with `### Added`, `### Changed`
-and `### Fixed` subsections; `test/release.test.mjs` fails otherwise.
+and `### Fixed` subsections; `test/release.test.mjs` fails otherwise. A
+section may also end with an `### Internal` subsection. No other `###`
+headings are allowed, and the four appear in that order.
 
 - Add a line under the matching subsection of that section with your change.
+- `### Added`, `### Changed` and `### Fixed` are for changes a user of the
+  package sees: new surface, changed behaviour or output, and fixed behaviour
+  or output. A change that only touches tests, documentation or CI goes under
+  `### Internal`, even when it fixes a mistake, so a reader who scans by
+  heading does not take it for a behaviour fix. Write "None." under an empty
+  `### Added`, `### Changed` or `### Fixed`; leave `### Internal` out when it
+  would be empty.
+- Released sections are not rewritten to this convention. It applies from
+  the next release on.
 - When work starts on the next version, bump `version` in `package.json` and
   open a new `## [<new version>] - unreleased` section above the last one.
 - The release PR replaces `unreleased` with the release date. Publishing
