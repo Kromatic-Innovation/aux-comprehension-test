@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.2.4] - unreleased
+
+### Added
+
+- None.
+
+### Changed
+
+- The `panelist` dependency now accepts every version from 0.4.2 on
+  (`>=0.4.2`) instead of `^0.4.1`, which on 0.x only admitted 0.4.x.
+  Installing this package now picks up new `panelist` releases, including a
+  future 0.5.x, without a release here. The lockfile resolves 0.4.2, which
+  changes nothing this package calls
+  ([#88](https://github.com/Kromatic-Innovation/aux-comprehension-test/issues/88)).
+
+### Fixed
+
+- None.
+
 ## [0.2.3] - 2026-11-22
 
 Release-review polish. This release adds direct tests for the re-read

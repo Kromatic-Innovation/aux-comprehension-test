@@ -52,9 +52,10 @@ Running from a git checkout instead? Run `npm ci` in it first.
 The one runtime dependency is [panelist](https://www.npmjs.com/package/panelist),
 which supplies the persona registry and the `spawn` prompt the readers run
 through. It is **pre-1.0** and comes from the same organisation as this
-package, so the two move together. The supported range is `^0.4.1` (from
-`package.json`), which npm reads as `>=0.4.1 <0.5.0`: a panelist `0.5.0`
-is a breaking change until this package widens the range.
+package, so the two move together. The supported range is `>=0.4.2` (from
+`package.json`): this package accepts every panelist release from 0.4.2 on,
+including a future `0.5.0`. When a panelist release breaks this package, an
+issue to update this package is filed here.
 
 ## First run (no key, no spend)
 
