@@ -19,6 +19,13 @@
 
 - None.
 
+### Internal
+
+- README now has a Status section: the project is in maintenance (bug and
+  security fixes only, best effort; no new features planned), and the
+  Maintainer section no longer invites feature requests
+  ([#92](https://github.com/Kromatic-Innovation/aux-comprehension-test/issues/92)).
+
 ## [0.2.3] - 2026-11-22
 
 Release-review polish. This release adds direct tests for the re-read
