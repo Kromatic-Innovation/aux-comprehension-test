@@ -31,6 +31,17 @@ host, a cautious agent, a technical-term searcher and a literal reader.
 > default, and refuses to start when the pre-run estimate is over your ceiling.
 > The first run below needs no key and spends nothing.
 
+## Status
+
+**In maintenance.** aux-comprehension-test is stable and still supported, but
+it is no longer under active feature development:
+
+- **Bug fixes and security fixes only**, on a best-effort basis (see
+  [Maintainer](#maintainer) and [SECURITY.md](SECURITY.md)).
+- **No new features are planned.** Feature requests may be closed without
+  being built; a fork is the fastest way to get one.
+- Releases continue when a fix or a `panelist` update needs one.
+
 ## Install
 
 Requires Node 20 or later.
@@ -571,8 +582,9 @@ manual eval; see [`eval/README.md`](eval/README.md).
 
 ## Maintainer
 
-Maintained by Kromatic. For bugs and features, open an issue on this
-repository. For anything security-sensitive, do **not** open a public issue —
+Maintained by Kromatic. The project is in maintenance (see
+[Status](#status)): for bugs, open an issue on this repository; new features
+are not planned. For anything security-sensitive, do **not** open a public issue —
 email **security@kromatic.com** instead (see [SECURITY.md](SECURITY.md)).
 
 Maintenance is **best effort, with no SLA**. We aim to reply to issues and
